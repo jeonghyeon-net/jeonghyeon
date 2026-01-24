@@ -1,3 +1,7 @@
+<img width="1319" height="869" alt="image" src="https://github.com/user-attachments/assets/bab75274-a326-4d6a-9b8d-b9ff61e824c9" />
+
+
+
 Jeonghyeon
 
 매일 터미널 열 개 띄워놓고 AI한테 코딩 시키다가 귀찮아서 그냥 내가 통합 앱을 만들어버린 건에 대하여
