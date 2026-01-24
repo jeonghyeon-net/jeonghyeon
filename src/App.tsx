@@ -256,6 +256,78 @@ const SHORTCUT_LABELS: Record<ShortcutKey, string> = {
   newTerminalGroup: "New Terminal Group",
 };
 
+// === Pomodoro Timer ===
+type PomodoroMode = "work" | "shortBreak" | "longBreak";
+
+type PomodoroSettings = {
+  workDuration: number; // minutes
+  shortBreakDuration: number;
+  longBreakDuration: number;
+  sessionsBeforeLongBreak: number;
+  soundEnabled: boolean;
+};
+
+const DEFAULT_POMODORO_SETTINGS: PomodoroSettings = {
+  workDuration: 25,
+  shortBreakDuration: 5,
+  longBreakDuration: 15,
+  sessionsBeforeLongBreak: 4,
+  soundEnabled: true,
+};
+
+function getPomodoroSettings(): PomodoroSettings {
+  const saved = localStorage.getItem("pomodoro_settings");
+  if (saved) {
+    try {
+      return { ...DEFAULT_POMODORO_SETTINGS, ...JSON.parse(saved) };
+    } catch {
+      return DEFAULT_POMODORO_SETTINGS;
+    }
+  }
+  return DEFAULT_POMODORO_SETTINGS;
+}
+
+function savePomodoroSettings(settings: PomodoroSettings) {
+  localStorage.setItem("pomodoro_settings", JSON.stringify(settings));
+}
+
+function playNotificationSound() {
+  // Create a simple beep sound using Web Audio API
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.value = 800;
+    oscillator.type = "sine";
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.5);
+
+    // Play second beep
+    setTimeout(() => {
+      const osc2 = audioContext.createOscillator();
+      const gain2 = audioContext.createGain();
+      osc2.connect(gain2);
+      gain2.connect(audioContext.destination);
+      osc2.frequency.value = 1000;
+      osc2.type = "sine";
+      gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      osc2.start(audioContext.currentTime);
+      osc2.stop(audioContext.currentTime + 0.5);
+    }, 200);
+  } catch (e) {
+    console.error("Failed to play notification sound:", e);
+  }
+}
+
 function getShortcuts(): ShortcutConfig {
   const saved = localStorage.getItem("keyboard_shortcuts");
   if (saved) {
@@ -4342,6 +4414,244 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
 
 const POLL_INTERVAL = 30000; // 30 seconds
 
+// Pomodoro Timer Component
+function PomodoroTimer() {
+  const [settings, setSettings] = useState<PomodoroSettings>(getPomodoroSettings);
+  const [mode, setMode] = useState<PomodoroMode>("work");
+  const [timeLeft, setTimeLeft] = useState(settings.workDuration * 60);
+  const [isRunning, setIsRunning] = useState(false);
+  const [sessionCount, setSessionCount] = useState(0);
+  const [showPopover, setShowPopover] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [editSettings, setEditSettings] = useState<PomodoroSettings>(settings);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Get duration for current mode
+  const getDuration = useCallback((m: PomodoroMode, s: PomodoroSettings) => {
+    switch (m) {
+      case "work": return s.workDuration * 60;
+      case "shortBreak": return s.shortBreakDuration * 60;
+      case "longBreak": return s.longBreakDuration * 60;
+    }
+  }, []);
+
+  // Timer logic
+  useEffect(() => {
+    if (!isRunning) return;
+
+    const interval = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          // Timer completed
+          if (settings.soundEnabled) {
+            playNotificationSound();
+          }
+
+          // Determine next mode
+          if (mode === "work") {
+            const newSessionCount = sessionCount + 1;
+            setSessionCount(newSessionCount);
+
+            if (newSessionCount % settings.sessionsBeforeLongBreak === 0) {
+              setMode("longBreak");
+              return settings.longBreakDuration * 60;
+            } else {
+              setMode("shortBreak");
+              return settings.shortBreakDuration * 60;
+            }
+          } else {
+            // Break finished, back to work
+            setMode("work");
+            return settings.workDuration * 60;
+          }
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isRunning, mode, sessionCount, settings]);
+
+  // Close popover when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setShowPopover(false);
+        setShowSettings(false);
+      }
+    };
+
+    if (showPopover) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showPopover]);
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const toggleTimer = () => setIsRunning(!isRunning);
+
+  const resetTimer = () => {
+    setIsRunning(false);
+    setTimeLeft(getDuration(mode, settings));
+  };
+
+  const skipToNext = () => {
+    setIsRunning(false);
+    if (mode === "work") {
+      const newSessionCount = sessionCount + 1;
+      setSessionCount(newSessionCount);
+      if (newSessionCount % settings.sessionsBeforeLongBreak === 0) {
+        setMode("longBreak");
+        setTimeLeft(settings.longBreakDuration * 60);
+      } else {
+        setMode("shortBreak");
+        setTimeLeft(settings.shortBreakDuration * 60);
+      }
+    } else {
+      setMode("work");
+      setTimeLeft(settings.workDuration * 60);
+    }
+  };
+
+  const switchMode = (newMode: PomodoroMode) => {
+    setMode(newMode);
+    setTimeLeft(getDuration(newMode, settings));
+    setIsRunning(false);
+  };
+
+  const saveSettings = () => {
+    setSettings(editSettings);
+    savePomodoroSettings(editSettings);
+    setTimeLeft(getDuration(mode, editSettings));
+    setShowSettings(false);
+  };
+
+  const resetAll = () => {
+    setIsRunning(false);
+    setMode("work");
+    setTimeLeft(settings.workDuration * 60);
+    setSessionCount(0);
+  };
+
+  const getModeLabel = () => {
+    switch (mode) {
+      case "work": return "Work";
+      case "shortBreak": return "Break";
+      case "longBreak": return "Long Break";
+    }
+  };
+
+  const getModeColor = () => {
+    switch (mode) {
+      case "work": return "var(--error)";
+      case "shortBreak": return "var(--success)";
+      case "longBreak": return "var(--accent)";
+    }
+  };
+
+  const progress = 1 - (timeLeft / getDuration(mode, settings));
+
+  return (
+    <div className="pomodoro-timer" ref={popoverRef}>
+      <button
+        className={`pomodoro-badge ${isRunning ? "running" : ""}`}
+        onClick={() => setShowPopover(!showPopover)}
+        style={isRunning ? { borderColor: getModeColor(), color: getModeColor() } : undefined}
+      >
+        <svg className="pomodoro-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <span className="pomodoro-time">{formatTime(timeLeft)}</span>
+        {isRunning && (
+          <span className="pomodoro-mode-indicator" style={{ background: getModeColor() }} />
+        )}
+      </button>
+
+      {showPopover && (
+        <div className="pomodoro-popover">
+          {showSettings ? (
+            <div className="pomodoro-settings">
+              <div className="pomodoro-setting-row">
+                <span>Work</span>
+                <input type="number" min="1" max="120" value={editSettings.workDuration} onChange={e => setEditSettings({ ...editSettings, workDuration: parseInt(e.target.value) || 25 })} />
+              </div>
+              <div className="pomodoro-setting-row">
+                <span>Short break</span>
+                <input type="number" min="1" max="60" value={editSettings.shortBreakDuration} onChange={e => setEditSettings({ ...editSettings, shortBreakDuration: parseInt(e.target.value) || 5 })} />
+              </div>
+              <div className="pomodoro-setting-row">
+                <span>Long break</span>
+                <input type="number" min="1" max="60" value={editSettings.longBreakDuration} onChange={e => setEditSettings({ ...editSettings, longBreakDuration: parseInt(e.target.value) || 15 })} />
+              </div>
+              <div className="pomodoro-setting-row">
+                <span>Long break after</span>
+                <input type="number" min="1" max="10" value={editSettings.sessionsBeforeLongBreak} onChange={e => setEditSettings({ ...editSettings, sessionsBeforeLongBreak: parseInt(e.target.value) || 4 })} />
+              </div>
+              <div className="pomodoro-setting-row">
+                <label><input type="checkbox" checked={editSettings.soundEnabled} onChange={e => setEditSettings({ ...editSettings, soundEnabled: e.target.checked })} />Sound</label>
+                <button className="pomodoro-link-btn" onClick={playNotificationSound}>Test</button>
+              </div>
+              <div className="pomodoro-setting-actions">
+                <button className="pomodoro-link-btn" onClick={() => setEditSettings(DEFAULT_POMODORO_SETTINGS)}>Reset</button>
+                <div className="pomodoro-setting-btns">
+                  <button className="pomodoro-text-btn" onClick={() => { setEditSettings(settings); setShowSettings(false); }}>Cancel</button>
+                  <button className="pomodoro-text-btn primary" onClick={saveSettings}>Save</button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="pomodoro-main">
+              <div className="pomodoro-ring" style={{ "--progress": progress, "--color": getModeColor() } as React.CSSProperties}>
+                <svg viewBox="0 0 100 100">
+                  <circle className="pomodoro-ring-bg" cx="50" cy="50" r="42" />
+                  <circle className="pomodoro-ring-fill" cx="50" cy="50" r="42" />
+                </svg>
+                <div className="pomodoro-ring-content">
+                  <div className="pomodoro-time-text">{formatTime(timeLeft)}</div>
+                  <div className="pomodoro-mode-text" style={{ color: getModeColor() }}>{getModeLabel()}</div>
+                </div>
+              </div>
+              <div className="pomodoro-tabs">
+                <button className={mode === "work" ? "active" : ""} onClick={() => switchMode("work")}>Work</button>
+                <button className={mode === "shortBreak" ? "active" : ""} onClick={() => switchMode("shortBreak")}>Break</button>
+                <button className={mode === "longBreak" ? "active" : ""} onClick={() => switchMode("longBreak")}>Long</button>
+              </div>
+              <div className="pomodoro-btns">
+                <button className="pomodoro-ctrl-btn" onClick={resetTimer} title="Reset">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>
+                </button>
+                <button className="pomodoro-play-btn" onClick={toggleTimer}>
+                  {isRunning ? (
+                    <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21" /></svg>
+                  )}
+                </button>
+                <button className="pomodoro-ctrl-btn" onClick={skipToNext} title="Skip">
+                  <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 4 15 12 5 20" /><rect x="17" y="4" width="2" height="16" /></svg>
+                </button>
+              </div>
+              <div className="pomodoro-footer">
+                <span>#{sessionCount}</span>
+                <div className="pomodoro-footer-btns">
+                  {sessionCount > 0 && <button className="pomodoro-link-btn" onClick={resetAll}>Reset</button>}
+                  <button className="pomodoro-link-btn" onClick={() => { setEditSettings(settings); setShowSettings(true); }}>Settings</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MainApp({ onLogout }: { onLogout: () => void }) {
   const [sidebarWidth, setSidebarWidth] = useState(400);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -4578,7 +4888,9 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
       </div>
     </div>
     <div className="status-bar">
-      <div className="status-bar-left" />
+      <div className="status-bar-left">
+        <PomodoroTimer />
+      </div>
       <div className="status-bar-right">
         <button className="status-bar-btn" onClick={() => {
           setShowGlobalSettings(true);
