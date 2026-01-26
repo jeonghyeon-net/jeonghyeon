@@ -739,6 +739,21 @@ const PlusIcon = () => (
   </svg>
 );
 
+const PinIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+  </svg>
+);
+
+const UnpinIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+    <line x1="2" y1="2" x2="22" y2="22" />
+  </svg>
+);
+
 const GearIcon = () => (
   <svg className="icon-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
@@ -1308,6 +1323,8 @@ function ProjectTree({
   onIssueClick,
   selectedIssue,
   onCreateClick,
+  pinnedIssues,
+  onPinToggle,
 }: {
   onSettingsClick: (projectKey: string) => void;
   onRefresh: number;
@@ -1316,6 +1333,8 @@ function ProjectTree({
   onIssueClick: (issueKey: string) => void;
   selectedIssue: string | null;
   onCreateClick: (projectKey: string) => void;
+  pinnedIssues: string[];
+  onPinToggle: (issueKey: string) => void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1432,18 +1451,33 @@ function ProjectTree({
           </div>
           {openProjects[project.key] && projectIssues[project.key] && (
             <div>
-              {projectIssues[project.key].map((issue) => (
+              {[...projectIssues[project.key]].sort((a, b) => {
+                const aPinned = pinnedIssues.includes(a.key);
+                const bPinned = pinnedIssues.includes(b.key);
+                if (aPinned && !bPinned) return -1;
+                if (!aPinned && bPinned) return 1;
+                return 0;
+              }).map((issue) => (
                 <div
                   key={issue.id}
-                  className={`tree-item file ${selectedIssue === issue.key ? "selected" : ""}`}
+                  className={`tree-item file issue-item ${selectedIssue === issue.key ? "selected" : ""}`}
                   onClick={() => onIssueClick(issue.key)}
                   data-status-category={issue.statusCategory}
                   data-status={issue.status}
                   style={{ color: getStatusColor(issue.status, issue.statusCategory) }}
                 >
-                  <PriorityIcon priority={issue.priority} />
-                  <span className="issue-key">{issue.key}</span>
-                  <span className="node-name">{issue.summary}</span>
+                  <div className="issue-item-left">
+                    <PriorityIcon priority={issue.priority} />
+                    <span className="issue-key">{issue.key}</span>
+                    <span className="node-name">{issue.summary}</span>
+                  </div>
+                  <button
+                    className={`icon-btn issue-pin-btn ${pinnedIssues.includes(issue.key) ? "pinned" : ""}`}
+                    onClick={(e) => { e.stopPropagation(); onPinToggle(issue.key); }}
+                    title={pinnedIssues.includes(issue.key) ? "Unpin" : "Pin"}
+                  >
+                    {pinnedIssues.includes(issue.key) ? <UnpinIcon /> : <PinIcon />}
+                  </button>
                 </div>
               ))}
               {projectIssues[project.key].length === 0 && (
@@ -5239,6 +5273,10 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [hiddenProjects, setHiddenProjectsState] = useState<string[]>(getHiddenProjects());
+  const [pinnedIssues, setPinnedIssuesState] = useState<string[]>(() => {
+    const saved = localStorage.getItem(`${getStoragePrefix()}pinned_issues`);
+    return saved ? JSON.parse(saved) : [];
+  });
   const [showHiddenPanel, setShowHiddenPanel] = useState(false);
   const [createProject, setCreateProject] = useState<string | null>(null);
   const [createParent, setCreateParent] = useState<string | null>(null);
@@ -5319,6 +5357,14 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
     const updated = hiddenProjects.filter(k => k !== projectKey);
     setHiddenProjects(updated);
     setHiddenProjectsState(updated);
+  };
+
+  const togglePinIssue = (issueKey: string) => {
+    const updated = pinnedIssues.includes(issueKey)
+      ? pinnedIssues.filter(k => k !== issueKey)
+      : [...pinnedIssues, issueKey];
+    setPinnedIssuesState(updated);
+    localStorage.setItem(`${getStoragePrefix()}pinned_issues`, JSON.stringify(updated));
   };
 
   const startResizing = useCallback(() => setIsResizing(true), []);
@@ -5427,6 +5473,8 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
             onIssueClick={handleIssueClick}
             selectedIssue={selectedIssue}
             onCreateClick={handleCreateClick}
+            pinnedIssues={pinnedIssues}
+            onPinToggle={togglePinIssue}
           />
       </div>
       {sidebarCollapsed && (

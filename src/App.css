@@ -462,6 +462,33 @@ html, body, #root {
   white-space: nowrap;
 }
 
+.tree-item.issue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.tree-item.issue-item .issue-item-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tree-item.issue-item .issue-pin-btn {
+  display: none;
+  flex-shrink: 0;
+  position: absolute;
+  right: 4px;
+}
+
+.tree-item.issue-item:hover .issue-pin-btn,
+.tree-item.issue-item .issue-pin-btn.pinned {
+  display: flex;
+}
+
 .tree-item.empty {
   opacity: 0.4;
   font-style: italic;
