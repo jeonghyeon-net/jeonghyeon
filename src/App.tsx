@@ -3410,6 +3410,21 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   const [branchMode, setBranchMode] = useState<"new" | "existing">("new");
   const [selectedExistingBranch, setSelectedExistingBranch] = useState("");
 
+  // Branch name validation
+  const isValidBranchName = (name: string): boolean => {
+    if (!name) return true; // Empty is valid (will use issueKey as default)
+    // Git branch naming rules
+    if (name.startsWith(".") || name.startsWith("-")) return false;
+    if (name.endsWith(".") || name.endsWith("/") || name.endsWith(".lock")) return false;
+    if (name.includes("..") || name.includes("//") || name.includes("@{")) return false;
+    // Invalid characters: space, ~, ^, :, ?, *, [, \, control chars
+    if (/[\s~^:?*\[\]\\]/.test(name)) return false;
+    return true;
+  };
+  const branchNameError = branchMode === "new" && branchName && !isValidBranchName(branchName)
+    ? "Invalid branch name"
+    : null;
+
   // Worktree popover state
   const [showWorktreePopover, setShowWorktreePopover] = useState(false);
   const [isDeletingWorktree, setIsDeletingWorktree] = useState(false);
@@ -3696,7 +3711,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           setConfirmDelete(false);
           setBranchMode("new");
           setSelectedExistingBranch("");
-          setBranchName("");
+          setBranchName(capturedIssueKey);
         }
       }
     }
@@ -4201,6 +4216,8 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
                           value={branchName}
                           onChange={(e) => setBranchName(e.target.value)}
                           placeholder={issueKey}
+                          className={branchNameError ? "input-error" : ""}
+                          title={branchNameError || ""}
                         />
                       ) : (
                         <select
@@ -4250,7 +4267,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
                   <button
                     className="terminal-connect-btn"
                     onClick={createWorktree}
-                    disabled={branchMode === "new" ? (!branchName || !baseBranch) : !selectedExistingBranch}
+                    disabled={branchMode === "new" ? (!branchName || !baseBranch || !!branchNameError) : !selectedExistingBranch}
                   >
                     Create Worktree
                   </button>

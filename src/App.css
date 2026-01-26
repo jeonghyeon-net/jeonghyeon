@@ -2370,6 +2370,11 @@ html, body, #root {
   min-width: 0;
 }
 
+.terminal-worktree-branch-input input.input-error {
+  border-color: var(--error, #dc3545);
+  background-color: rgba(220, 53, 69, 0.1);
+}
+
 .terminal-worktree-mode-btn {
   display: flex;
   align-items: center;
