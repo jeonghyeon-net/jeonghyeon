@@ -434,7 +434,7 @@ html, body, #root {
 
 .tree-item.file,
 .tree-item.file * {
-  padding-left: 20px;
+  padding-left: 8px;
   gap: 5px;
   justify-content: flex-start;
   cursor: pointer !important;
@@ -475,6 +475,19 @@ html, body, #root {
   gap: 5px;
   min-width: 0;
   flex: 1;
+}
+
+.tree-item.issue-item .worktree-slot {
+  width: var(--icon-size-xs);
+  height: var(--icon-size-xs);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tree-item.issue-item .worktree-indicator {
+  color: var(--accent-color);
 }
 
 .tree-item.issue-item .issue-pin-btn {
