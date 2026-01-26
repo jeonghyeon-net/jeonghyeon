@@ -2980,6 +2980,12 @@ const CopyIcon = () => (
   </svg>
 );
 
+const CheckIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
 type ThemeListItem = {
   name: string;
   filename: string | null; // null for default theme
@@ -3517,7 +3523,7 @@ function TerminalGroupView({
   );
 }
 
-function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMaximized, setIsMaximized }: { issueKey: string; projectKey: string; isCollapsed: boolean; setIsCollapsed: (v: boolean) => void; isMaximized: boolean; setIsMaximized: (v: boolean) => void }) {
+function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMaximized, setIsMaximized, onWorktreeChange }: { issueKey: string; projectKey: string; isCollapsed: boolean; setIsCollapsed: (v: boolean) => void; isMaximized: boolean; setIsMaximized: (v: boolean) => void; onWorktreeChange?: () => void }) {
   // Track current issueKey for async callbacks (update during render, not in useEffect)
   const issueKeyRef = useRef(issueKey);
   issueKeyRef.current = issueKey; // Sync update during render to avoid timing issues
@@ -3564,6 +3570,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   const [showWorktreePopover, setShowWorktreePopover] = useState(false);
   const [isDeletingWorktree, setIsDeletingWorktree] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [pathCopied, setPathCopied] = useState(false);
 
   // PR state
   const [prUrl, setPrUrl] = useState<string | null>(null);
@@ -3711,6 +3718,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           setActiveGroupIdState(1);
           setNextGroupIdState(2);
         }
+        onWorktreeChange?.();
       } else {
         // Use existing local branch
         await invoke("run_git_command", {
@@ -3746,6 +3754,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           setActiveGroupIdState(1);
           setNextGroupIdState(2);
         }
+        onWorktreeChange?.();
       }
     } catch (e: any) {
       // Check if this request is still valid
@@ -3846,6 +3855,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           }
         }
       }
+      onWorktreeChange?.();
     }
   };
 
@@ -4479,7 +4489,12 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                           </div>
                           <div className="terminal-popover-row">
                             <span className="terminal-popover-label">Path</span>
-                            <span className="terminal-popover-value terminal-popover-path">{worktreeInfo.path}</span>
+                            <div className="terminal-popover-path-row">
+                              <span className="terminal-popover-value terminal-popover-path">{worktreeInfo.path}</span>
+                              <button className={`terminal-popover-copy ${pathCopied ? 'copied' : ''}`} onClick={() => { navigator.clipboard.writeText(worktreeInfo.path); setPathCopied(true); setTimeout(() => setPathCopied(false), 1500); }} title="Copy path">
+                                {pathCopied ? <CheckIcon /> : <CopyIcon />}
+                              </button>
+                            </div>
                           </div>
                         </div>
                         <button
@@ -4767,7 +4782,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           <div className="skeleton skeleton-line" />
           <div className="skeleton skeleton-line shorter" />
         </div>
-        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />}
+        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} onWorktreeChange={onRefresh} />}
       </div>
     );
   }
@@ -4778,7 +4793,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         <div className="issue-detail scrollable">
           <div className="issue-error">Failed to load issue</div>
         </div>
-        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />}
+        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} onWorktreeChange={onRefresh} />}
       </div>
     );
   }
@@ -5476,7 +5491,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         </div>
       </div>
       </div>
-      {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />}
+      {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} onWorktreeChange={onRefresh} />}
     </div>
   );
 }
