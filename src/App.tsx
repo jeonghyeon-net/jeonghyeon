@@ -7,6 +7,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -102,6 +104,47 @@ type JiraConnection = {
   token: string;
   baseUrl: string;
 };
+
+// Code block component for markdown rendering
+function CodeBlock({ children, className, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const match = /language-(\w+)/.exec(className || "");
+  const isInline = !match && typeof children === "string" && !children.includes("\n");
+
+  const handleCopy = async () => {
+    const code = String(children).replace(/\n$/, "");
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (isInline) {
+    return <code className="inline-code" {...props}>{children}</code>;
+  }
+
+  return (
+    <div className="code-block-wrapper">
+      <div className="code-block-header">
+        <span className="code-block-lang">{match ? match[1] : "code"}</span>
+        <button className="code-copy-btn" onClick={handleCopy}>
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <SyntaxHighlighter
+        style={vscDarkPlus as { [key: string]: React.CSSProperties }}
+        language={match ? match[1] : "text"}
+        PreTag="div"
+        customStyle={{
+          margin: 0,
+          borderRadius: "0 0 6px 6px",
+          fontSize: "13px",
+        }}
+      >
+        {String(children).replace(/\n$/, "")}
+      </SyntaxHighlighter>
+    </div>
+  );
+}
 
 function generateConnectionId(): string {
   return `conn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -5216,6 +5259,8 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                       {children}
                     </a>
                   ),
+                  pre: ({ children }) => <>{children}</>,
+                  code: CodeBlock,
                 }}
               >
                 {issue.description}
@@ -5283,6 +5328,8 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                         {children}
                       </a>
                     ),
+                    pre: ({ children }) => <>{children}</>,
+                    code: CodeBlock,
                   }}
                 >
                   {comment.body}

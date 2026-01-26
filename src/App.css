@@ -1380,16 +1380,58 @@ html, body, #root {
   margin-bottom: 0;
 }
 
-.description-content code,
-.comment-body code {
+/* Inline code */
+.inline-code {
   background: var(--bg-code);
-  padding: 2px 5px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
   font-family: var(--font-family-mono);
   font-size: 0.9em;
+  color: var(--accent);
+}
+
+/* Code block wrapper */
+.code-block-wrapper {
+  margin: 12px 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+}
+
+.code-block-lang {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-family-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.code-copy-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer !important;
+  transition: all 0.15s ease;
+}
+
+.code-copy-btn:hover {
+  background: var(--bg-active);
   color: var(--text);
 }
 
+/* Fallback for non-highlighted code blocks */
 .description-content pre,
 .comment-body pre {
   background: var(--bg-pre);
@@ -1406,6 +1448,7 @@ html, body, #root {
   padding: 0;
   font-size: var(--font-size-md);
   line-height: 1.5;
+  font-family: var(--font-family-mono);
 }
 
 .description-content ul,
