@@ -2843,6 +2843,10 @@ html, body, #root {
   border-right: 1px solid var(--border);
 }
 
+.terminal-group-tab * {
+  cursor: pointer !important;
+}
+
 .terminal-group-tab:hover {
   color: var(--text);
   background: var(--bg-hover);

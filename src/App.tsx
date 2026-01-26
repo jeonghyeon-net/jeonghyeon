@@ -801,9 +801,10 @@ const PlusIcon = () => (
 );
 
 const ExternalTerminalIcon = () => (
-  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="4 17 10 11 4 5" />
-    <line x1="12" y1="19" x2="20" y2="19" />
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="1" y="2" width="22" height="20" rx="2" />
+    <path d="M5 9l3 3-3 3" />
+    <path d="M10 15h6" />
   </svg>
 );
 
