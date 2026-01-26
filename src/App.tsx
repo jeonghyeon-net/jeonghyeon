@@ -74,6 +74,7 @@ type IssueDetail = {
   created: string;
   updated: string;
   labels: string[];
+  components: string[];
   issueType: string;
   projectKey: string;
   comments: Comment[];
@@ -864,7 +865,7 @@ async function fetchIssues(projectKey: string): Promise<Issue[]> {
 }
 
 async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
-  const url = `${getBaseUrl()}/rest/api/3/issue/${issueKey}?fields=summary,description,status,priority,assignee,reporter,created,updated,labels,issuetype,comment,project,parent,timetracking,worklog`;
+  const url = `${getBaseUrl()}/rest/api/3/issue/${issueKey}?fields=summary,description,status,priority,assignee,reporter,created,updated,labels,components,issuetype,comment,project,parent,timetracking,worklog`;
   const res = await fetch(url, {
     headers: {
       Authorization: getAuthHeader(),
@@ -919,6 +920,7 @@ async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
     created: data.fields.created || "",
     updated: data.fields.updated || "",
     labels: data.fields.labels || [],
+    components: (data.fields.components || []).map((c: any) => c.name),
     issueType: data.fields.issuetype?.name || "",
     projectKey: data.fields.project?.key || issueKey.split("-")[0],
     comments,
@@ -989,6 +991,24 @@ async function fetchPriorities(): Promise<{ id: string; name: string }[]> {
   if (!res.ok) return [];
   const data = await res.json();
   return data.map((p: any) => ({ id: p.id, name: p.name }));
+}
+
+async function fetchProjectComponents(projectKey: string): Promise<{ id: string; name: string }[]> {
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/project/${projectKey}/components`, {
+    headers: { Authorization: getAuthHeader(), Accept: "application/json" },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.map((c: any) => ({ id: c.id, name: c.name }));
+}
+
+async function fetchLabels(): Promise<string[]> {
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/label`, {
+    headers: { Authorization: getAuthHeader(), Accept: "application/json" },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.values || [];
 }
 
 // Worklog API functions
@@ -1131,6 +1151,8 @@ type CreateIssueParams = {
   priorityId?: string;
   assigneeId?: string;
   parentKey?: string;
+  labels?: string[];
+  componentIds?: string[];
 };
 
 async function createIssue(params: CreateIssueParams): Promise<string> {
@@ -1150,6 +1172,12 @@ async function createIssue(params: CreateIssueParams): Promise<string> {
   }
   if (params.parentKey) {
     fields.parent = { key: params.parentKey };
+  }
+  if (params.labels && params.labels.length > 0) {
+    fields.labels = params.labels;
+  }
+  if (params.componentIds && params.componentIds.length > 0) {
+    fields.components = params.componentIds.map(id => ({ id }));
   }
 
   const res = await fetch(`${getBaseUrl()}/rest/api/3/issue`, {
@@ -1871,6 +1899,10 @@ function CreateIssueForm({
   const [issueTypes, setIssueTypes] = useState<string[]>([]);
   const [priorities, setPriorities] = useState<{ id: string; name: string }[]>([]);
   const [users, setUsers] = useState<{ accountId: string; displayName: string }[]>([]);
+  const [availableLabels, setAvailableLabels] = useState<string[]>([]);
+  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const [projectComponents, setProjectComponents] = useState<{ id: string; name: string }[]>([]);
+  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -1881,10 +1913,14 @@ function CreateIssueForm({
       fetchPriorities(),
       fetchAssignableUsers(projectKey),
       fetchCurrentUser(),
-    ]).then(([types, prios, usrs, currentUser]) => {
+      fetchLabels(),
+      fetchProjectComponents(projectKey),
+    ]).then(([types, prios, usrs, currentUser, labels, comps]) => {
       setIssueTypes(types);
       setPriorities(prios);
       setUsers(usrs);
+      setAvailableLabels(labels);
+      setProjectComponents(comps);
       if (types.length > 0) setIssueType(types[0]);
       if (currentUser) setAssigneeId(currentUser.accountId);
       setLoading(false);
@@ -1906,6 +1942,8 @@ function CreateIssueForm({
         priorityId: priorityId || undefined,
         assigneeId: assigneeId || undefined,
         parentKey: parentKey || undefined,
+        labels: selectedLabels.length > 0 ? selectedLabels : undefined,
+        componentIds: selectedComponents.length > 0 ? selectedComponents : undefined,
       });
       onCreated(newKey);
     } catch (err: any) {
@@ -1971,6 +2009,60 @@ function CreateIssueForm({
                   <option key={u.accountId} value={u.accountId}>{u.displayName}</option>
                 ))}
               </select>
+            )}
+          </div>
+        </div>
+
+        <div className="filter-row">
+          <div className="input-group">
+            <label>Labels</label>
+            {loading ? (
+              <span className="loading-text">Loading...</span>
+            ) : (
+              <div className="create-tags-list">
+                {availableLabels.map((label) => (
+                  <span
+                    key={label}
+                    className={`tag-selectable ${selectedLabels.includes(label) ? "selected" : ""}`}
+                    onClick={() => {
+                      if (selectedLabels.includes(label)) {
+                        setSelectedLabels(selectedLabels.filter(l => l !== label));
+                      } else {
+                        setSelectedLabels([...selectedLabels, label]);
+                      }
+                    }}
+                  >
+                    {label}
+                  </span>
+                ))}
+                {availableLabels.length === 0 && <span className="meta-empty">None</span>}
+              </div>
+            )}
+          </div>
+
+          <div className="input-group">
+            <label>Components</label>
+            {loading ? (
+              <span className="loading-text">Loading...</span>
+            ) : (
+              <div className="create-tags-list">
+                {projectComponents.map((comp) => (
+                  <span
+                    key={comp.id}
+                    className={`tag-selectable ${selectedComponents.includes(comp.id) ? "selected" : ""}`}
+                    onClick={() => {
+                      if (selectedComponents.includes(comp.id)) {
+                        setSelectedComponents(selectedComponents.filter(c => c !== comp.id));
+                      } else {
+                        setSelectedComponents([...selectedComponents, comp.id]);
+                      }
+                    }}
+                  >
+                    {comp.name}
+                  </span>
+                ))}
+                {projectComponents.length === 0 && <span className="meta-empty">None</span>}
+              </div>
             )}
           </div>
         </div>
@@ -2867,7 +2959,7 @@ function getIssueTerminalState(issueKey: string): IssueTerminalState {
       activeGroupId: null,
       nextGroupId: 1,
       isCollapsed: false,
-      terminalHeight: 400,
+      terminalHeight: 500,
     });
   }
   return issueTerminalStates.get(issueKey)!;
@@ -4225,6 +4317,14 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
+  // Labels and components editing
+  const [availableLabels, setAvailableLabels] = useState<string[]>([]);
+  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const [labelsLoading, setLabelsLoading] = useState(false);
+  const [projectComponents, setProjectComponents] = useState<{ id: string; name: string }[]>([]);
+  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
+  const [componentsLoading, setComponentsLoading] = useState(false);
+
   // Time tracking states
   const [showLogWork, setShowLogWork] = useState(false);
   const [logTimeSpent, setLogTimeSpent] = useState("");
@@ -4332,6 +4432,24 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
       setEditValue(issue.summary);
     } else if (field === "description") {
       setEditValue(issue.description);
+    } else if (field === "labels") {
+      setLabelsLoading(true);
+      const [labels, latestIssue] = await Promise.all([
+        fetchLabels(),
+        fetchIssueDetail(issueKey)
+      ]);
+      setAvailableLabels(labels);
+      setSelectedLabels(latestIssue.labels);
+      setLabelsLoading(false);
+    } else if (field === "components") {
+      setComponentsLoading(true);
+      const [comps, latestIssue] = await Promise.all([
+        fetchProjectComponents(issue.projectKey),
+        fetchIssueDetail(issueKey)
+      ]);
+      setProjectComponents(comps);
+      setSelectedComponents(latestIssue.components);
+      setComponentsLoading(false);
     }
   };
 
@@ -4360,6 +4478,14 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           })),
         };
         await updateIssueField(issueKey, "description", adf);
+      } else if (field === "labels") {
+        await updateIssueField(issueKey, "labels", value);
+      } else if (field === "components") {
+        const components = value.map((name: string) => {
+          const comp = projectComponents.find(c => c.name === name);
+          return comp ? { id: comp.id } : null;
+        }).filter(Boolean);
+        await updateIssueField(issueKey, "components", components);
       }
       reload();
       onRefresh();
@@ -4421,7 +4547,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
 
   // Format minutes to time string like "1h 30m"
   const formatMinutesToTime = (mins: number): string => {
-    if (mins <= 0) return "";
+    if (mins <= 0) return "0m";
     const hours = Math.floor(mins / 60);
     const minutes = mins % 60;
     if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
@@ -4641,6 +4767,82 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           <span className="meta-value">{formatDate(issue.updated)}</span>
         </div>
 
+        <div className="issue-meta-item">
+          <span className="meta-label">Labels</span>
+          {editing === "labels" ? (
+            labelsLoading ? (
+              <span className="meta-value"><Spinner /></span>
+            ) : (
+              <div className="edit-tags-container">
+                <div className="edit-tags-list">
+                  {[...new Set([...availableLabels, ...selectedLabels])].sort().map((label) => (
+                    <span
+                      key={label}
+                      className={`tag-selectable ${selectedLabels.includes(label) ? "selected" : ""}`}
+                      onClick={() => {
+                        if (selectedLabels.includes(label)) {
+                          setSelectedLabels(selectedLabels.filter(l => l !== label));
+                        } else {
+                          setSelectedLabels([...selectedLabels, label]);
+                        }
+                      }}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+                <button className="edit-save" onClick={() => saveEdit("labels", selectedLabels)} disabled={saving}>Save</button>
+                <button className="edit-cancel-small" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            )
+          ) : (
+            <span className="meta-value meta-value-tags editable" onClick={() => startEdit("labels")}>
+              {issue.labels.length > 0 ? issue.labels.map((label) => (
+                <span key={label} className="label-badge">{label}</span>
+              )) : <span className="meta-empty">None</span>}
+              <span className="edit-icon"><EditIcon /></span>
+            </span>
+          )}
+        </div>
+
+        <div className="issue-meta-item">
+          <span className="meta-label">Components</span>
+          {editing === "components" ? (
+            componentsLoading ? (
+              <span className="meta-value"><Spinner /></span>
+            ) : (
+              <div className="edit-tags-container">
+                <div className="edit-tags-list">
+                  {projectComponents.map((comp) => (
+                    <span
+                      key={comp.id}
+                      className={`tag-selectable ${selectedComponents.includes(comp.name) ? "selected" : ""}`}
+                      onClick={() => {
+                        if (selectedComponents.includes(comp.name)) {
+                          setSelectedComponents(selectedComponents.filter(c => c !== comp.name));
+                        } else {
+                          setSelectedComponents([...selectedComponents, comp.name]);
+                        }
+                      }}
+                    >
+                      {comp.name}
+                    </span>
+                  ))}
+                </div>
+                <button className="edit-save" onClick={() => saveEdit("components", selectedComponents)} disabled={saving}>Save</button>
+                <button className="edit-cancel-small" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            )
+          ) : (
+            <span className="meta-value meta-value-tags editable" onClick={() => startEdit("components")}>
+              {issue.components.length > 0 ? issue.components.map((comp) => (
+                <span key={comp} className="component-badge">{comp}</span>
+              )) : <span className="meta-empty">None</span>}
+              <span className="edit-icon"><EditIcon /></span>
+            </span>
+          )}
+        </div>
+
         <div className="issue-meta-item time-meta-item">
           <span className="meta-label">Time</span>
           <span className="meta-value time-tracking-value">
@@ -4685,7 +4887,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                 </>
               ) : (
                 <span className="time-text editable" onClick={() => { if (timeSaving) return; setEditing("estimate"); setEstimateValue(issue.timeTracking?.originalEstimate || ""); }}>
-                  {issue.timeTracking?.originalEstimate || "—"}
+                  {issue.timeTracking?.originalEstimate || "0m"}
                 </span>
               )}
             </span>
@@ -4721,14 +4923,14 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                 </>
               ) : (
                 <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { if (timeSaving) return; setEditing("remaining"); setRemainingValue(issue.timeTracking?.remainingEstimate || ""); }}>
-                  {issue.timeTracking?.remainingEstimate || "—"}
+                  {issue.timeTracking?.remainingEstimate || "0m"}
                 </span>
               )}
             </span>
             <span className="time-item">
               <span className="time-label-mini">Logged</span>
               <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { if (timeSaving) return; if (!showLogWork) { setLogTimeSpent(""); setLogComment(""); } setShowLogWork(!showLogWork); }}>
-                {issue.timeTracking?.timeSpent || "—"}
+                {issue.timeTracking?.timeSpent || "0m"}
                 {timeExceeded && <span className="time-excess"> (+{formatMinutesToTime(excessMinutes)})</span>}
               </span>
             </span>

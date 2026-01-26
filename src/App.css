@@ -1190,7 +1190,7 @@ html, body, #root {
 .issue-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 24px;
+  gap: 8px 24px;
   padding: 12px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -1228,7 +1228,113 @@ html, body, #root {
   background: var(--border);
   padding: 2px 6px;
   border-radius: 3px;
-  margin-right: 4px;
+  cursor: pointer !important;
+}
+
+.component-badge {
+  font-size: var(--font-size-xs);
+  background: var(--border);
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer !important;
+}
+
+.meta-value-tags {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  align-items: center;
+  position: relative;
+  width: fit-content;
+}
+
+.meta-value-tags.editable {
+  cursor: pointer !important;
+}
+
+.meta-empty {
+  color: var(--text-muted);
+  font-style: italic;
+  cursor: pointer !important;
+}
+
+.edit-tags-container {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.edit-tags-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.tag-selectable {
+  font-size: var(--font-size-xs);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer !important;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  transition: all 0.15s;
+  user-select: none;
+  opacity: 0.5;
+}
+
+.tag-selectable:hover {
+  opacity: 0.8;
+}
+
+.tag-selectable.selected {
+  background: var(--border);
+  color: var(--text);
+  border-color: var(--border);
+  opacity: 1;
+}
+
+.tag-input-inline {
+  font-size: var(--font-size-xs);
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 3px;
+  width: 60px;
+  outline: none;
+  cursor: text !important;
+}
+
+.tag-input-inline:focus {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.tag-input-inline::placeholder {
+  color: var(--text-muted);
+}
+
+.edit-tags-container .edit-save {
+  background: none;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+}
+
+.edit-tags-container .edit-save:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+  background: none;
+}
+
+.edit-tags-container .edit-cancel-small {
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
 }
 
 .issue-description {
@@ -1931,6 +2037,14 @@ html, body, #root {
 /* Create Issue Form */
 .create-issue-form {
   padding: 16px 20px;
+}
+
+.create-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-height: 28px;
 }
 
 .create-textarea {
