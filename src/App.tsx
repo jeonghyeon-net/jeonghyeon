@@ -2952,7 +2952,6 @@ type IssueTerminalState = {
   groups: TerminalGroup[];
   activeGroupId: number | null;
   nextGroupId: number;
-  isCollapsed: boolean;
   terminalHeight: number;
   isDeleting?: boolean; // Worktree deletion in progress
   isCreating?: boolean; // Worktree creation in progress
@@ -2971,7 +2970,6 @@ function getIssueTerminalState(issueKey: string): IssueTerminalState {
       groups: [],
       activeGroupId: null,
       nextGroupId: 1,
-      isCollapsed: false,
       terminalHeight: 500,
     });
   }
@@ -3391,7 +3389,7 @@ function TerminalGroupView({
   );
 }
 
-function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey: string }) {
+function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMaximized, setIsMaximized }: { issueKey: string; projectKey: string; isCollapsed: boolean; setIsCollapsed: (v: boolean) => void; isMaximized: boolean; setIsMaximized: (v: boolean) => void }) {
   // Track current issueKey for async callbacks (update during render, not in useEffect)
   const issueKeyRef = useRef(issueKey);
   issueKeyRef.current = issueKey; // Sync update during render to avoid timing issues
@@ -3404,9 +3402,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   const [activeGroupId, setActiveGroupIdState] = useState<number | null>(savedState.activeGroupId);
   const [nextGroupId, setNextGroupIdState] = useState(savedState.nextGroupId);
   const [terminalHeight, setTerminalHeightState] = useState(savedState.terminalHeight);
-  const [isCollapsed, setIsCollapsedState] = useState(savedState.isCollapsed);
   const [isResizing, setIsResizing] = useState(false);
-  const [isMaximized, setIsMaximized] = useState(false);
   const [terminalFontSize] = useState(getTerminalFontSize);
   const [resizingGroupIndex, setResizingGroupIndex] = useState<number | null>(null);
   const groupsContainerRef = useRef<HTMLDivElement>(null);
@@ -3573,10 +3569,10 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           groups: [newGroup],
           activeGroupId: 1,
           nextGroupId: 2,
-          isCollapsed: false,
           isCreating: false,
           isAutoCreatingTerminal: false,
         });
+        setIsCollapsed(false);
 
         // Write setup.sh
         invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
@@ -3609,10 +3605,10 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           groups: [newGroup],
           activeGroupId: 1,
           nextGroupId: 2,
-          isCollapsed: false,
           isCreating: false,
           isAutoCreatingTerminal: false,
         });
+        setIsCollapsed(false);
 
         // Write setup.sh
         invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
@@ -3746,27 +3742,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setTerminalHeightState(h);
     setIssueTerminalState(issueKey, { terminalHeight: h });
   };
-  const setIsCollapsed = (v: boolean) => {
-    setIsCollapsedState(v);
-    setIssueTerminalState(issueKey, { isCollapsed: v });
-  };
-
-  // Toggle terminal shortcut
-  useEffect(() => {
-    const shortcuts = getShortcuts();
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (matchesShortcut(e, shortcuts.toggleTerminal)) {
-        e.preventDefault();
-        setIsCollapsedState(prev => {
-          const next = !prev;
-          setIssueTerminalState(issueKey, { isCollapsed: next });
-          return next;
-        });
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [issueKey]);
 
   // Reload state when issueKey changes
   useEffect(() => {
@@ -3775,7 +3750,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setActiveGroupIdState(state.activeGroupId);
     setNextGroupIdState(state.nextGroupId);
     setTerminalHeightState(state.terminalHeight);
-    setIsCollapsedState(state.isCollapsed);
     setRepoPath(getProjectRepoPath(projectKey) || null);
     // If creating/deleting, show null worktreeInfo to display indicator
     const isInProgress = state.isDeleting || state.isCreating;
@@ -3879,7 +3853,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           groups: [newGroup],
           activeGroupId: groupId,
           nextGroupId: groupId + 1,
-          isCollapsed: false,
           isAutoCreatingTerminal: false,
         });
 
@@ -3888,7 +3861,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           setGroupsState([newGroup]);
           setActiveGroupIdState(groupId);
           setNextGroupIdState(groupId + 1);
-          setIsCollapsedState(false);
+          setIsCollapsed(false);
         }
 
         // setup.sh is now run in createWorktree, not here
@@ -3924,14 +3897,13 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
       setIssueTerminalState(capturedIssueKey, {
         groups: [...currentState.groups, newGroup],
         activeGroupId: groupId,
-        isCollapsed: false,
       });
 
       // Only update local state if still on the same issue
       if (issueKeyRef.current === capturedIssueKey) {
         setGroupsState(prev => [...prev, newGroup]);
         setActiveGroupIdState(groupId);
-        setIsCollapsedState(false);
+        setIsCollapsed(false);
       }
     } catch (e) {
       console.error("Failed to create PTY:", e);
@@ -4422,7 +4394,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   );
 }
 
-function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, refreshTrigger }: { issueKey: string; onIssueClick: (key: string) => void; onCreateChild: (projectKey: string, parentKey: string) => void; onRefresh: () => void; refreshTrigger: number }) {
+function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, refreshTrigger, terminalCollapsed, setTerminalCollapsed, terminalMaximized, setTerminalMaximized }: { issueKey: string; onIssueClick: (key: string) => void; onCreateChild: (projectKey: string, parentKey: string) => void; onRefresh: () => void; refreshTrigger: number; terminalCollapsed: boolean; setTerminalCollapsed: (v: boolean) => void; terminalMaximized: boolean; setTerminalMaximized: (v: boolean) => void }) {
   const [showTerminal, _setShowTerminal] = useState(true);
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -4643,7 +4615,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           <div className="skeleton skeleton-line" />
           <div className="skeleton skeleton-line shorter" />
         </div>
-        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
+        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />}
       </div>
     );
   }
@@ -4654,7 +4626,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         <div className="issue-detail scrollable">
           <div className="issue-error">Failed to load issue</div>
         </div>
-        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
+        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />}
       </div>
     );
   }
@@ -5348,7 +5320,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         </div>
       </div>
       </div>
-      {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
+      {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />}
     </div>
   );
 }
@@ -5714,6 +5686,8 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
   const [settingsProject, setSettingsProject] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [terminalCollapsed, setTerminalCollapsed] = useState(false);
+  const [terminalMaximized, setTerminalMaximized] = useState(false);
   const [hiddenProjects, setHiddenProjectsState] = useState<string[]>(getHiddenProjects());
   const [pinnedIssues, setPinnedIssuesState] = useState<string[]>(() => {
     const saved = localStorage.getItem(`${getStoragePrefix()}pinned_issues`);
@@ -5774,6 +5748,19 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
       if (matchesShortcut(e, shortcuts.toggleSidebar)) {
         e.preventDefault();
         setSidebarCollapsed(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Toggle terminal shortcut
+  useEffect(() => {
+    const shortcuts = getShortcuts();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (matchesShortcut(e, shortcuts.toggleTerminal)) {
+        e.preventDefault();
+        setTerminalCollapsed(prev => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -5945,7 +5932,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
             }}
           />
         ) : selectedIssue ? (
-          <IssueDetailView issueKey={selectedIssue} onIssueClick={handleIssueClick} onCreateChild={handleCreateChild} onRefresh={() => setRefreshTrigger(n => n + 1)} refreshTrigger={issueRefreshTrigger} />
+          <IssueDetailView issueKey={selectedIssue} onIssueClick={handleIssueClick} onCreateChild={handleCreateChild} onRefresh={() => setRefreshTrigger(n => n + 1)} refreshTrigger={issueRefreshTrigger} terminalCollapsed={terminalCollapsed} setTerminalCollapsed={setTerminalCollapsed} terminalMaximized={terminalMaximized} setTerminalMaximized={setTerminalMaximized} />
         ) : (
           <div className="empty-detail">
             <div className="empty-detail-content">
