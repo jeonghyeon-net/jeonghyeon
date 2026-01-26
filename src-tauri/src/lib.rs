@@ -158,20 +158,24 @@ fn check_path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
-fn run_git_command(cwd: String, args: Vec<String>) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("Failed to execute git: {}", e))?;
+async fn run_git_command(cwd: String, args: Vec<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("Failed to execute git: {}", e))?;
 
-    if output.status.success() {
-        String::from_utf8(output.stdout)
-            .map_err(|e| format!("Invalid UTF-8: {}", e))
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(stderr.to_string())
-    }
+        if output.status.success() {
+            String::from_utf8(output.stdout)
+                .map_err(|e| format!("Invalid UTF-8: {}", e))
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(stderr.to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -238,20 +242,24 @@ fn create_dir_all(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn run_gh_command(cwd: String, args: Vec<String>) -> Result<String, String> {
-    let output = Command::new("gh")
-        .args(&args)
-        .current_dir(&cwd)
-        .output()
-        .map_err(|e| format!("Failed to execute gh: {}", e))?;
+async fn run_gh_command(cwd: String, args: Vec<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = Command::new("gh")
+            .args(&args)
+            .current_dir(&cwd)
+            .output()
+            .map_err(|e| format!("Failed to execute gh: {}", e))?;
 
-    if output.status.success() {
-        String::from_utf8(output.stdout)
-            .map_err(|e| format!("Invalid UTF-8: {}", e))
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(stderr.to_string())
-    }
+        if output.status.success() {
+            String::from_utf8(output.stdout)
+                .map_err(|e| format!("Invalid UTF-8: {}", e))
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(stderr.to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

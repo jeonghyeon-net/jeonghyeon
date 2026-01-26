@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, Fragment } from "react";
+import React, { useState, useCallback, useEffect, useRef, Fragment } from "react";
 import { fetch } from "@tauri-apps/plugin-http";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
@@ -313,6 +313,17 @@ function getPomodoroSettings(): PomodoroSettings {
 
 function savePomodoroSettings(settings: PomodoroSettings) {
   localStorage.setItem("pomodoro_settings", JSON.stringify(settings));
+}
+
+// === Quick Memo ===
+function getMemo(connectionId: string | null): string {
+  if (!connectionId) return "";
+  return localStorage.getItem(`quick_memo_${connectionId}`) || "";
+}
+
+function saveMemo(connectionId: string | null, content: string) {
+  if (!connectionId) return;
+  localStorage.setItem(`quick_memo_${connectionId}`, content);
 }
 
 function playNotificationSound() {
@@ -3434,33 +3445,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     }
   };
 
-  // Sync terminal state when issue changes
-  const prevIssueKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (prevIssueKeyRef.current !== issueKey) {
-      // Load state for the new issue
-      const newState = getIssueTerminalState(issueKey);
-      setGroupsState(newState.groups);
-      setActiveGroupIdState(newState.activeGroupId);
-      setNextGroupIdState(newState.nextGroupId);
-      setIsCollapsedState(newState.isCollapsed);
-      setTerminalHeightState(newState.terminalHeight);
-
-      // Also update worktree info for the new issue
-      setWorktreeInfo(getIssueWorktree(projectKey, issueKey));
-
-      // Reset branch name and PR state
-      setBranchName(issueKey.toLowerCase());
-      setPrUrl(null);
-      setPrState(null);
-      setPrIsDraft(false);
-      setPrNumber(null);
-      currentPrCheckRef.current = null;
-
-      prevIssueKeyRef.current = issueKey;
-    }
-  }, [issueKey, projectKey]);
-
   // Load branches when repoPath is set or issue changes
   useEffect(() => {
     if (!repoPath || worktreeInfo) return;
@@ -3469,24 +3453,54 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setCurrentBranch("");
     setBaseBranch("");
 
-    Promise.all([
-      invoke("run_git_command", { cwd: repoPath, args: ["branch", "-a"] }),
-      invoke("run_git_command", { cwd: repoPath, args: ["rev-parse", "--abbrev-ref", "HEAD"] }),
-    ]).then(([branchOutput, currentOutput]) => {
-      const branchList = (branchOutput as string)
-        .split("\n")
-        .map(b => b.trim().replace(/^\* /, ""))
-        .filter(b => b && !b.startsWith("remotes/origin/HEAD"));
-      setBranches(branchList);
-      const current = (currentOutput as string).trim();
-      setCurrentBranch(current);
-      setBaseBranch(current);
-    }).catch(e => {
-      console.error("Failed to load branches:", e);
-      setWorktreeError("Failed to load branches. Is this a git repository?");
-    }).finally(() => {
-      setIsLoadingBranches(false);
-    });
+    // Track if this effect is still current
+    let cancelled = false;
+
+    // Fetch and prune remote branches, then prune stale local branches
+    invoke("run_git_command", { cwd: repoPath, args: ["fetch", "--prune"] })
+      .catch(() => {}) // Ignore fetch errors (e.g., no network)
+      .finally(async () => {
+        if (cancelled) return;
+        // Prune local branches whose upstream is gone
+        try {
+          const branchVV = await invoke("run_git_command", { cwd: repoPath, args: ["branch", "-vv"] }) as string;
+          const goneBranches = branchVV
+            .split("\n")
+            .filter(line => line.includes(": gone]"))
+            .map(line => line.trim().replace(/^\* /, "").split(/\s+/)[0])
+            .filter(b => b);
+          for (const branch of goneBranches) {
+            await invoke("run_git_command", { cwd: repoPath, args: ["branch", "-d", branch] }).catch(() => {});
+          }
+        } catch (e) {
+          // Ignore prune errors
+        }
+
+        if (cancelled) return;
+        Promise.all([
+          invoke("run_git_command", { cwd: repoPath, args: ["branch", "-a"] }),
+          invoke("run_git_command", { cwd: repoPath, args: ["rev-parse", "--abbrev-ref", "HEAD"] }),
+        ]).then(([branchOutput, currentOutput]) => {
+          if (cancelled) return;
+          const branchList = (branchOutput as string)
+            .split("\n")
+            .map(b => b.trim().replace(/^\* /, ""))
+            .filter(b => b && !b.startsWith("remotes/origin/HEAD"));
+          setBranches(branchList);
+          const current = (currentOutput as string).trim();
+          setCurrentBranch(current);
+          setBaseBranch(current);
+        }).catch(e => {
+          if (cancelled) return;
+          console.error("Failed to load branches:", e);
+          setWorktreeError("Failed to load branches. Is this a git repository?");
+        }).finally(() => {
+          if (cancelled) return;
+          setIsLoadingBranches(false);
+        });
+      });
+
+    return () => { cancelled = true; };
   }, [repoPath, worktreeInfo, issueKey]);
 
   // Create worktree
@@ -3545,6 +3559,12 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
             args: ["worktree", "add", worktreePath, targetBranch],
           });
         }
+
+        // Push new branch to origin
+        await invoke("run_git_command", {
+          cwd: worktreePath,
+          args: ["push", "-u", "origin", targetBranch],
+        }).catch(e => console.warn("Failed to push to origin:", e));
 
         const info = { path: worktreePath, branch: targetBranch };
         saveIssueWorktree(projectKey, issueKey, info);
@@ -3713,8 +3733,9 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setWorktreeError(null);
     setBranchMode("new");
     setSelectedExistingBranch("");
-    setBranchName("");
+    setBranchName(issueKey);
     setPrUrl(null);
+    setPrIsDraft(false);
     setPrState(null);
     setPrNumber(null);
   }, [issueKey, projectKey]);
@@ -4096,7 +4117,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
                           type="text"
                           value={branchName}
                           onChange={(e) => setBranchName(e.target.value)}
-                          placeholder={issueKey.toLowerCase()}
+                          placeholder={issueKey}
                         />
                       ) : (
                         <select
@@ -4758,16 +4779,6 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         </div>
 
         <div className="issue-meta-item">
-          <span className="meta-label">Created</span>
-          <span className="meta-value">{formatDate(issue.created)}</span>
-        </div>
-
-        <div className="issue-meta-item">
-          <span className="meta-label">Updated</span>
-          <span className="meta-value">{formatDate(issue.updated)}</span>
-        </div>
-
-        <div className="issue-meta-item">
           <span className="meta-label">Labels</span>
           {editing === "labels" ? (
             labelsLoading ? (
@@ -4841,6 +4852,16 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
               <span className="edit-icon"><EditIcon /></span>
             </span>
           )}
+        </div>
+
+        <div className="issue-meta-item">
+          <span className="meta-label">Created</span>
+          <span className="meta-value">{formatDate(issue.created)}</span>
+        </div>
+
+        <div className="issue-meta-item">
+          <span className="meta-label">Updated</span>
+          <span className="meta-value">{formatDate(issue.updated)}</span>
         </div>
 
         <div className="issue-meta-item time-meta-item">
@@ -5228,6 +5249,120 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
 }
 
 const POLL_INTERVAL = 30000; // 30 seconds
+
+// Quick Memo Component
+const DEFAULT_MEMO_SIZE = { width: 400, height: 300 };
+const MIN_MEMO_SIZE = { width: 280, height: 150 };
+const MAX_MEMO_SIZE = { width: 600, height: 500 };
+
+function getMemoSize() {
+  const saved = localStorage.getItem("quick_memo_size");
+  if (saved) {
+    try { return { ...DEFAULT_MEMO_SIZE, ...JSON.parse(saved) }; } catch { return DEFAULT_MEMO_SIZE; }
+  }
+  return DEFAULT_MEMO_SIZE;
+}
+
+function QuickMemo() {
+  const connectionId = getActiveConnectionId();
+  const [content, setContent] = useState(() => getMemo(connectionId));
+  const [showPopover, setShowPopover] = useState(false);
+  const [size, setSize] = useState(getMemoSize);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const prevConnectionId = useRef(connectionId);
+
+  // Reload memo when connection changes
+  useEffect(() => {
+    if (prevConnectionId.current !== connectionId) {
+      setContent(getMemo(connectionId));
+      prevConnectionId.current = connectionId;
+    }
+  }, [connectionId]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (isDragging.current) return;
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setShowPopover(false);
+      }
+    };
+    if (showPopover) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showPopover]);
+
+  useEffect(() => {
+    if (showPopover && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [showPopover]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newContent = e.target.value;
+    setContent(newContent);
+    saveMemo(connectionId, newContent);
+  };
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    dragStart.current = { x: e.clientX, y: e.clientY, width: size.width, height: size.height };
+    let lastSize = { width: size.width, height: size.height };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      const deltaX = e.clientX - dragStart.current.x;
+      const deltaY = dragStart.current.y - e.clientY;
+      const newWidth = Math.min(MAX_MEMO_SIZE.width, Math.max(MIN_MEMO_SIZE.width, dragStart.current.width + deltaX));
+      const newHeight = Math.min(MAX_MEMO_SIZE.height, Math.max(MIN_MEMO_SIZE.height, dragStart.current.height + deltaY));
+      lastSize = { width: newWidth, height: newHeight };
+      setSize(lastSize);
+    };
+
+    const handleMouseUp = () => {
+      isDragging.current = false;
+      localStorage.setItem("quick_memo_size", JSON.stringify(lastSize));
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  };
+
+  return (
+    <div className="quick-memo" ref={popoverRef}>
+      <button
+        className="quick-memo-badge"
+        onClick={() => setShowPopover(!showPopover)}
+      >
+        <svg className="quick-memo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </svg>
+      </button>
+      {showPopover && (
+        <div className="quick-memo-popover" style={{ width: size.width, height: size.height }}>
+          <div className="quick-memo-resize-handle" onMouseDown={handleResizeStart} />
+          <textarea
+            ref={textareaRef}
+            className="quick-memo-textarea"
+            value={content}
+            onChange={handleChange}
+            placeholder="Memo..."
+            spellCheck={false}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Pomodoro Timer Component
 function PomodoroTimer() {
@@ -5719,6 +5854,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
     <div className="status-bar">
       <div className="status-bar-left">
         <PomodoroTimer />
+        <QuickMemo />
       </div>
       <div className="status-bar-right">
         <button className="status-bar-btn" onClick={() => {
