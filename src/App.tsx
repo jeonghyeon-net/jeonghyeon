@@ -2281,7 +2281,7 @@ function GlobalSettings({ onLogout }: { onLogout: () => void }) {
       }
     }
 
-    // 4. Delete local branch
+    // 4. Delete local branch only (no remote)
     if (repoPath && wt.info.branch && !wt.info.branch.startsWith("detached:")) {
       try {
         await invoke("run_git_command", {
@@ -2293,19 +2293,7 @@ function GlobalSettings({ onLogout }: { onLogout: () => void }) {
       }
     }
 
-    // 5. Delete remote branch
-    if (repoPath && wt.info.branch && !wt.info.branch.startsWith("detached:")) {
-      try {
-        await invoke("run_git_command", {
-          cwd: repoPath,
-          args: ["push", "origin", "--delete", wt.info.branch],
-        });
-      } catch (e) {
-        console.error(`Failed to delete remote branch ${wt.info.branch}:`, e);
-      }
-    }
-
-    // 6. Remove from localStorage if not orphaned
+    // 5. Remove from localStorage if not orphaned
     if (!wt.isOrphaned && wt.key) {
       localStorage.removeItem(wt.key);
     }
@@ -2332,12 +2320,10 @@ function GlobalSettings({ onLogout }: { onLogout: () => void }) {
     setConfirmDeleteAll(false);
     setDeletingWorktrees(true);
 
-    // Process deletions without blocking UI
+    // Process deletions in parallel
     const toDelete = [...worktrees];
-    for (const wt of toDelete) {
-      await deleteWorktreeEntry(wt);
-      setWorktrees(prev => prev.filter(w => w.key !== wt.key));
-    }
+    await Promise.allSettled(toDelete.map(wt => deleteWorktreeEntry(wt)));
+    setWorktrees([]);
     setDeletingWorktrees(false);
   };
 
@@ -2959,9 +2945,16 @@ type IssueTerminalState = {
   nextGroupId: number;
   isCollapsed: boolean;
   terminalHeight: number;
+  isDeleting?: boolean; // Worktree deletion in progress
+  isCreating?: boolean; // Worktree creation in progress
+  isAutoCreatingTerminal?: boolean; // Auto-creating first terminal in progress
 };
 
 const issueTerminalStates = new Map<string, IssueTerminalState>();
+
+// Request IDs to handle concurrent operations per issue
+const deleteRequestIds = new Map<string, number>();
+const createRequestIds = new Map<string, number>();
 
 function getIssueTerminalState(issueKey: string): IssueTerminalState {
   if (!issueTerminalStates.has(issueKey)) {
@@ -3390,6 +3383,10 @@ function TerminalGroupView({
 }
 
 function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey: string }) {
+  // Track current issueKey for async callbacks (update during render, not in useEffect)
+  const issueKeyRef = useRef(issueKey);
+  issueKeyRef.current = issueKey; // Sync update during render to avoid timing issues
+
   // Load state from global store
   const savedState = getIssueTerminalState(issueKey);
   const [repoPath, setRepoPath] = useState(() => getProjectRepoPath(projectKey) || null);
@@ -3428,8 +3425,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   const [prNumber, setPrNumber] = useState<number | null>(null);
   const currentPrCheckRef = useRef<{ branch: string; repoPath: string } | null>(null);
 
-  // Flag to run ./setup.sh only on first terminal after worktree creation
-  const justCreatedWorktreeRef = useRef(false);
 
   // Handle repository selection
   const selectRepository = async () => {
@@ -3446,6 +3441,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   };
 
   // Load branches when repoPath is set or issue changes
+  const branchLoadRequestIdRef = useRef(0);
   useEffect(() => {
     if (!repoPath || worktreeInfo) return;
     setIsLoadingBranches(true);
@@ -3453,77 +3449,52 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setCurrentBranch("");
     setBaseBranch("");
 
-    // Track if this effect is still current
-    let cancelled = false;
+    // Use request ID to track if this effect is still current
+    const currentRequestId = ++branchLoadRequestIdRef.current;
 
-    // Fetch and prune remote branches, then prune stale local branches
-    invoke("run_git_command", { cwd: repoPath, args: ["fetch", "--prune"] })
-      .catch(() => {}) // Ignore fetch errors (e.g., no network)
-      .finally(async () => {
-        if (cancelled) return;
-        // Prune local branches whose upstream is gone
-        try {
-          const branchVV = await invoke("run_git_command", { cwd: repoPath, args: ["branch", "-vv"] }) as string;
-          const goneBranches = branchVV
-            .split("\n")
-            .filter(line => line.includes(": gone]"))
-            .map(line => line.trim().replace(/^\* /, "").split(/\s+/)[0])
-            .filter(b => b);
-          for (const branch of goneBranches) {
-            await invoke("run_git_command", { cwd: repoPath, args: ["branch", "-d", branch] }).catch(() => {});
-          }
-        } catch (e) {
-          // Ignore prune errors
-        }
-
-        if (cancelled) return;
-        Promise.all([
-          invoke("run_git_command", { cwd: repoPath, args: ["branch", "-a"] }),
-          invoke("run_git_command", { cwd: repoPath, args: ["rev-parse", "--abbrev-ref", "HEAD"] }),
-        ]).then(([branchOutput, currentOutput]) => {
-          if (cancelled) return;
-          const branchList = (branchOutput as string)
-            .split("\n")
-            .map(b => b.trim().replace(/^[\*\+]\s*/, ""))
-            .filter(b => b && !b.startsWith("remotes/origin/HEAD"));
-          setBranches(branchList);
-          const current = (currentOutput as string).trim();
-          setCurrentBranch(current);
-          setBaseBranch(current);
-        }).catch(e => {
-          if (cancelled) return;
-          console.error("Failed to load branches:", e);
-          setWorktreeError("Failed to load branches. Is this a git repository?");
-        }).finally(() => {
-          if (cancelled) return;
-          setIsLoadingBranches(false);
-        });
-      });
-
-    return () => { cancelled = true; };
+    // Load local branches only (no remote fetch)
+    Promise.all([
+      invoke("run_git_command", { cwd: repoPath, args: ["branch"] }),
+      invoke("run_git_command", { cwd: repoPath, args: ["rev-parse", "--abbrev-ref", "HEAD"] }),
+    ]).then(([branchOutput, currentOutput]) => {
+      if (branchLoadRequestIdRef.current !== currentRequestId) return;
+      const branchList = (branchOutput as string)
+        .split("\n")
+        .map(b => b.trim().replace(/^[\*\+]\s*/, ""))
+        .filter(b => b);
+      setBranches(branchList);
+      const current = (currentOutput as string).trim();
+      setCurrentBranch(current);
+      setBaseBranch(current);
+    }).catch(e => {
+      if (branchLoadRequestIdRef.current !== currentRequestId) return;
+      console.error("Failed to load branches:", e);
+      setWorktreeError("Failed to load branches. Is this a git repository?");
+    }).finally(() => {
+      if (branchLoadRequestIdRef.current !== currentRequestId) return;
+      setIsLoadingBranches(false);
+    });
   }, [repoPath, worktreeInfo, issueKey]);
 
   // Create worktree
   const createWorktree = async () => {
+    const capturedIssueKey = issueKey; // Capture at start
     const targetBranch = branchMode === "new" ? branchName : selectedExistingBranch;
     if (!repoPath || !targetBranch) return;
     if (branchMode === "new" && !baseBranch) return;
 
+    // Generate unique request ID to handle concurrent operations
+    const requestId = (createRequestIds.get(capturedIssueKey) || 0) + 1;
+    createRequestIds.set(capturedIssueKey, requestId);
+
+    // Set creating state (issue-specific)
+    setIssueTerminalState(capturedIssueKey, { isDeleting: false, isCreating: true });
+    setIsDeletingWorktree(false);
     setIsCreatingWorktree(true);
     setWorktreeError(null);
 
-    // UI 업데이트 대기
-    await new Promise(resolve => setTimeout(resolve, 50));
-
     // Sanitize branch name for folder (replace / with -)
-    // For remote branches like "remotes/origin/branch", extract just the branch name
-    let folderBranchName = targetBranch;
-    if (folderBranchName.startsWith("remotes/")) {
-      // Extract branch name after origin/ (e.g., "remotes/origin/feature/test" -> "feature/test")
-      const parts = folderBranchName.split("/");
-      folderBranchName = parts.slice(2).join("/");
-    }
-    const folderName = folderBranchName.replace(/\//g, "-");
+    const folderName = targetBranch.replace(/\//g, "-");
 
     try {
       const homeDir: string = await invoke("get_home_dir");
@@ -3533,16 +3504,27 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
 
       // Check if worktree path already exists
       const exists: boolean = await invoke("check_path_exists", { path: worktreePath });
+
+      // Check if this request is still valid
+      if (createRequestIds.get(capturedIssueKey) !== requestId) return;
+
       if (exists) {
-        // Path exists, just use it
-        const info = { path: worktreePath, branch: folderBranchName };
-        saveIssueWorktree(projectKey, issueKey, info);
-        setWorktreeInfo(info);
+        // Path exists, just use it (no setup.sh for existing worktrees)
+        const info = { path: worktreePath, branch: targetBranch };
+        saveIssueWorktree(projectKey, capturedIssueKey, info);
+        setIssueTerminalState(capturedIssueKey, { isCreating: false });
+        if (issueKeyRef.current === capturedIssueKey) {
+          setWorktreeInfo(info);
+          setIsCreatingWorktree(false);
+        }
         return;
       }
 
       // Create directory structure
       await invoke("create_dir_all", { path: worktreeDir });
+
+      // Check if this request is still valid
+      if (createRequestIds.get(capturedIssueKey) !== requestId) return;
 
       if (branchMode === "new") {
         // Create worktree with new branch
@@ -3560,76 +3542,108 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           });
         }
 
-        // Push new branch to origin
-        await invoke("run_git_command", {
-          cwd: worktreePath,
-          args: ["push", "-u", "origin", targetBranch],
-        }).catch(e => console.warn("Failed to push to origin:", e));
+        // Check if this request is still valid
+        if (createRequestIds.get(capturedIssueKey) !== requestId) return;
 
         const info = { path: worktreePath, branch: targetBranch };
-        saveIssueWorktree(projectKey, issueKey, info);
-        justCreatedWorktreeRef.current = true;
-        setWorktreeInfo(info);
+        saveIssueWorktree(projectKey, capturedIssueKey, info);
+
+        // Create terminal and run setup.sh immediately (even if on different issue)
+        const sessionId = await invoke("create_pty_session", { rows: 24, cols: 80, cwd: worktreePath }) as number;
+        const newGroup = { id: 1, terminals: [sessionId], activeTerminal: sessionId, flex: 1 };
+
+        setIssueTerminalState(capturedIssueKey, {
+          groups: [newGroup],
+          activeGroupId: 1,
+          nextGroupId: 2,
+          isCollapsed: false,
+          isCreating: false,
+          isAutoCreatingTerminal: false,
+        });
+
+        // Write setup.sh
+        invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
+
+        if (issueKeyRef.current === capturedIssueKey) {
+          setWorktreeInfo(info);
+          setIsCreatingWorktree(false);
+          setGroupsState([newGroup]);
+          setActiveGroupIdState(1);
+          setNextGroupIdState(2);
+        }
       } else {
-        // Use existing branch
-        // For remote branches, we need to handle them differently
-        if (targetBranch.startsWith("remotes/")) {
-          // Extract the branch name without remotes/origin/ prefix
-          const parts = targetBranch.split("/");
-          const remoteName = parts[1]; // e.g., "origin"
-          const remoteBranchName = parts.slice(2).join("/");
+        // Use existing local branch
+        await invoke("run_git_command", {
+          cwd: repoPath,
+          args: ["worktree", "add", worktreePath, targetBranch],
+        });
 
-          try {
-            // Try creating worktree tracking the remote branch
-            await invoke("run_git_command", {
-              cwd: repoPath,
-              args: ["worktree", "add", "--track", "-b", remoteBranchName, worktreePath, `${remoteName}/${remoteBranchName}`],
-            });
-          } catch (e: any) {
-            // Local branch with same name might already exist, try without -b
-            console.warn("Failed with --track -b, trying existing local branch:", e);
-            await invoke("run_git_command", {
-              cwd: repoPath,
-              args: ["worktree", "add", worktreePath, remoteBranchName],
-            });
-          }
+        // Check if this request is still valid
+        if (createRequestIds.get(capturedIssueKey) !== requestId) return;
 
-          const info = { path: worktreePath, branch: remoteBranchName };
-          saveIssueWorktree(projectKey, issueKey, info);
-          justCreatedWorktreeRef.current = true;
+        const info = { path: worktreePath, branch: targetBranch };
+        saveIssueWorktree(projectKey, capturedIssueKey, info);
+
+        // Create terminal and run setup.sh immediately (even if on different issue)
+        const sessionId = await invoke("create_pty_session", { rows: 24, cols: 80, cwd: worktreePath }) as number;
+        const newGroup = { id: 1, terminals: [sessionId], activeTerminal: sessionId, flex: 1 };
+
+        setIssueTerminalState(capturedIssueKey, {
+          groups: [newGroup],
+          activeGroupId: 1,
+          nextGroupId: 2,
+          isCollapsed: false,
+          isCreating: false,
+          isAutoCreatingTerminal: false,
+        });
+
+        // Write setup.sh
+        invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
+
+        if (issueKeyRef.current === capturedIssueKey) {
           setWorktreeInfo(info);
-        } else {
-          // Local branch
-          await invoke("run_git_command", {
-            cwd: repoPath,
-            args: ["worktree", "add", worktreePath, targetBranch],
-          });
-
-          const info = { path: worktreePath, branch: targetBranch };
-          saveIssueWorktree(projectKey, issueKey, info);
-          justCreatedWorktreeRef.current = true;
-          setWorktreeInfo(info);
+          setIsCreatingWorktree(false);
+          setGroupsState([newGroup]);
+          setActiveGroupIdState(1);
+          setNextGroupIdState(2);
         }
       }
     } catch (e: any) {
+      // Check if this request is still valid
+      if (createRequestIds.get(capturedIssueKey) !== requestId) return;
+
       console.error("Failed to create worktree:", e);
       setWorktreeError(e?.toString() || "Failed to create worktree");
-    } finally {
-      setIsCreatingWorktree(false);
+      setIssueTerminalState(capturedIssueKey, { isCreating: false });
+      if (issueKeyRef.current === capturedIssueKey) {
+        setIsCreatingWorktree(false);
+      }
     }
   };
 
   // Delete worktree
   const deleteWorktree = async () => {
-    if (!worktreeInfo || !repoPath) return;
-    setIsDeletingWorktree(true);
+    const capturedIssueKey = issueKey; // Capture at start
+    const capturedWorktreeInfo = worktreeInfo;
+    const capturedGroups = groups;
+    const capturedRepoPath = repoPath;
+    if (!capturedWorktreeInfo || !capturedRepoPath) return;
 
-    // UI 업데이트 대기
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Generate unique request ID to handle concurrent operations
+    const requestId = (deleteRequestIds.get(capturedIssueKey) || 0) + 1;
+    deleteRequestIds.set(capturedIssueKey, requestId);
+
+    // 1. Set deleting state and hide terminal immediately
+    setIssueTerminalState(capturedIssueKey, { isDeleting: true, groups: [], isAutoCreatingTerminal: false });
+    setIsDeletingWorktree(true);
+    setWorktreeInfo(null);
+    setGroupsState([]);
+    setShowWorktreePopover(false);
+    setConfirmDelete(false);
 
     try {
-      // Close all terminal sessions first
-      for (const group of groups) {
+      // 2. Clean up terminal cache (synchronous)
+      for (const group of capturedGroups) {
         for (const sessionId of group.terminals) {
           const cached = terminalCache.get(sessionId);
           if (cached) {
@@ -3637,62 +3651,61 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
             cached.term.dispose();
             terminalCache.delete(sessionId);
           }
-          try { await invoke("close_pty_session", { sessionId }); } catch {}
         }
       }
 
-      // Remove worktree using git
-      try {
-        await invoke("run_git_command", {
-          cwd: repoPath,
-          args: ["worktree", "remove", worktreeInfo.path, "--force"],
-        });
-      } catch (e) {
-        // If git worktree remove fails, manually delete the directory
-        console.warn("git worktree remove failed, removing directory manually:", e);
-        await invoke("delete_directory", { path: worktreeInfo.path }).catch(() => {});
-        // Prune stale worktrees
-        await invoke("run_git_command", {
-          cwd: repoPath,
-          args: ["worktree", "prune"],
-        }).catch(() => {});
+      // 3. Close PTY sessions
+      await Promise.all(
+        capturedGroups.flatMap(g => g.terminals).map(id =>
+          invoke("close_pty_session", { sessionId: id }).catch(() => {})
+        )
+      );
+
+      // 4. Delete directory (rm -rf)
+      await invoke("delete_directory", { path: capturedWorktreeInfo.path }).catch(() => {});
+
+      // 5. Check if this request is still valid (no newer delete started)
+      if (deleteRequestIds.get(capturedIssueKey) !== requestId) {
+        return; // Another operation started, cleanup happens in finally
       }
 
-      // Delete branch from origin
-      await invoke("run_git_command", {
-        cwd: repoPath,
-        args: ["push", "origin", "--delete", worktreeInfo.branch],
-      }).catch(e => console.warn("Failed to delete remote branch:", e));
+      // 6. Clear state after deletion complete (only if no new worktree was created)
+      const currentWorktree = getIssueWorktree(projectKey, capturedIssueKey);
+      const newWorktreeCreated = currentWorktree && currentWorktree.path !== capturedWorktreeInfo.path;
 
-      // Delete local branch
-      await invoke("run_git_command", {
-        cwd: repoPath,
-        args: ["branch", "-D", worktreeInfo.branch],
-      }).catch(e => console.warn("Failed to delete local branch:", e));
-    } catch (e) {
-      console.error("Failed to remove git worktree:", e);
-      // Continue anyway - might already be removed or have issues
+      if (!newWorktreeCreated) {
+        removeIssueWorktree(projectKey, capturedIssueKey);
+      }
+
+      // 7. Git cleanup - must be sequential: prune first, then delete branch
+      await invoke("run_git_command", { cwd: capturedRepoPath, args: ["worktree", "prune"] }).catch(() => {});
+      await invoke("run_git_command", { cwd: capturedRepoPath, args: ["branch", "-D", capturedWorktreeInfo.branch] }).catch(e => {
+        console.warn("Failed to delete branch:", e);
+      });
+    } finally {
+      // Always clear isDeleting flag
+      setIssueTerminalState(capturedIssueKey, {
+        isDeleting: false,
+        isAutoCreatingTerminal: false,
+      });
+
+      // Update local state if still on the same issue
+      if (issueKeyRef.current === capturedIssueKey) {
+        setIsDeletingWorktree(false);
+        const currentWorktree = getIssueWorktree(projectKey, capturedIssueKey);
+        if (!currentWorktree) {
+          setWorktreeInfo(null);
+          setGroupsState([]);
+          setActiveGroupIdState(null);
+          setNextGroupIdState(1);
+          setShowWorktreePopover(false);
+          setConfirmDelete(false);
+          setBranchMode("new");
+          setSelectedExistingBranch("");
+          setBranchName("");
+        }
+      }
     }
-
-    // Clear local state
-    removeIssueWorktree(projectKey, issueKey);
-    setWorktreeInfo(null);
-    setGroupsState([]);
-    setActiveGroupIdState(null);
-    setNextGroupIdState(1);
-    setIssueTerminalState(issueKey, {
-      groups: [],
-      activeGroupId: null,
-      nextGroupId: 1,
-      isCollapsed: false,
-    });
-    setShowWorktreePopover(false);
-    setConfirmDelete(false);
-    setIsDeletingWorktree(false);
-    // Reset branch selection state
-    setBranchMode("new");
-    setSelectedExistingBranch("");
-    setBranchName("");
   };
 
   // Get effective terminal path (worktree path)
@@ -3709,13 +3722,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   const setActiveGroupId = (id: number | null) => {
     setActiveGroupIdState(id);
     setIssueTerminalState(issueKey, { activeGroupId: id });
-  };
-  const setNextGroupId = (updater: number | ((n: number) => number)) => {
-    setNextGroupIdState(prev => {
-      const newVal = typeof updater === 'function' ? updater(prev) : updater;
-      setIssueTerminalState(issueKey, { nextGroupId: newVal });
-      return newVal;
-    });
   };
   const setTerminalHeight = (h: number) => {
     setTerminalHeightState(h);
@@ -3752,8 +3758,13 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setTerminalHeightState(state.terminalHeight);
     setIsCollapsedState(state.isCollapsed);
     setRepoPath(getProjectRepoPath(projectKey) || null);
-    setWorktreeInfo(getIssueWorktree(projectKey, issueKey));
+    // If creating/deleting, show null worktreeInfo to display indicator
+    const isInProgress = state.isDeleting || state.isCreating;
+    setWorktreeInfo(isInProgress ? null : getIssueWorktree(projectKey, issueKey));
     setWorktreeError(null);
+    setIsCreatingWorktree(state.isCreating || false);
+    setIsDeletingWorktree(state.isDeleting || false);
+    setConfirmDelete(false);
     setBranchMode("new");
     setSelectedExistingBranch("");
     setBranchName(issueKey);
@@ -3820,65 +3831,115 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
 
   // Auto-create terminal when worktree is ready and no terminals exist
   useEffect(() => {
+    // Capture issueKey at the start of this effect
+    const capturedIssueKey = issueKey;
+
     // Get the correct worktree for THIS issue (not from stale state)
-    const currentWorktree = getIssueWorktree(projectKey, issueKey);
+    const currentWorktree = getIssueWorktree(projectKey, capturedIssueKey);
     const currentTerminalPath = currentWorktree?.path || null;
     if (!currentTerminalPath) return;
-    const state = getIssueTerminalState(issueKey);
-    if (state.groups.length === 0) {
-      const groupId = state.nextGroupId;
-      const shouldRunSetup = justCreatedWorktreeRef.current;
-      justCreatedWorktreeRef.current = false; // Reset flag immediately
-      invoke("create_pty_session", { rows: 24, cols: 80, cwd: currentTerminalPath }).then((sessionId: unknown) => {
-        const newGroup = { id: groupId, terminals: [sessionId as number], activeTerminal: sessionId as number, flex: 1 };
-        setGroupsState([newGroup]);
-        setActiveGroupIdState(groupId);
-        setNextGroupIdState(groupId + 1);
-        setIsCollapsedState(false);
-        setIssueTerminalState(issueKey, {
+    const state = getIssueTerminalState(capturedIssueKey);
+    // Skip if already creating terminal or terminals exist
+    if (state.groups.length > 0 || state.isAutoCreatingTerminal) return;
+
+    const groupId = state.nextGroupId;
+
+    // Set flag SYNCHRONOUSLY to prevent duplicate creation
+    setIssueTerminalState(capturedIssueKey, {
+      isAutoCreatingTerminal: true,
+    });
+
+    // Create PTY and handle setup.sh
+    (async () => {
+      try {
+        const sessionId = await invoke("create_pty_session", { rows: 24, cols: 80, cwd: currentTerminalPath }) as number;
+        const newGroup = { id: groupId, terminals: [sessionId], activeTerminal: sessionId, flex: 1 };
+
+        // Save to global state for the captured issue
+        setIssueTerminalState(capturedIssueKey, {
           groups: [newGroup],
           activeGroupId: groupId,
           nextGroupId: groupId + 1,
-          isCollapsed: false
+          isCollapsed: false,
+          isAutoCreatingTerminal: false,
         });
-        // Run ./setup.sh only on first terminal after worktree creation
-        if (shouldRunSetup) {
-          // Wait for first PTY output (shell ready) before sending command
-          let unlistenFn: (() => void) | null = null;
-          listen(`pty-output-${sessionId}`, () => {
-            invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
-            unlistenFn?.();
-          }).then(fn => { unlistenFn = fn; });
+
+        // Only update local state if still on the same issue
+        if (issueKeyRef.current === capturedIssueKey) {
+          setGroupsState([newGroup]);
+          setActiveGroupIdState(groupId);
+          setNextGroupIdState(groupId + 1);
+          setIsCollapsedState(false);
         }
-      }).catch(e => console.error("Failed to create PTY:", e));
-    }
+
+        // setup.sh is now run in createWorktree, not here
+      } catch (e) {
+        console.error("Failed to create PTY:", e);
+        // Clear flag on error
+        setIssueTerminalState(capturedIssueKey, { isAutoCreatingTerminal: false });
+      }
+    })();
   }, [issueKey, projectKey, terminalPath]);
 
   const createNewGroup = async () => {
-    const currentWorktree = getIssueWorktree(projectKey, issueKey);
+    // Capture issueKey at the start of this function
+    const capturedIssueKey = issueKey;
+
+    const currentWorktree = getIssueWorktree(projectKey, capturedIssueKey);
     const cwd = currentWorktree?.path;
     if (!cwd) return;
     const groupId = nextGroupId;
-    setNextGroupId(n => n + 1);
+
+    // Optimistically update nextGroupId
+    const currentState = getIssueTerminalState(capturedIssueKey);
+    setIssueTerminalState(capturedIssueKey, { nextGroupId: groupId + 1 });
+    if (issueKeyRef.current === capturedIssueKey) {
+      setNextGroupIdState(groupId + 1);
+    }
+
     try {
       const sessionId: number = await invoke("create_pty_session", { rows: 24, cols: 80, cwd });
-      setGroups(prev => [...prev, { id: groupId, terminals: [sessionId], activeTerminal: sessionId, flex: 1 }]);
-      setActiveGroupId(groupId);
-      setIsCollapsed(false);
+      const newGroup = { id: groupId, terminals: [sessionId], activeTerminal: sessionId, flex: 1 };
+
+      // Always save to global state for the captured issue
+      setIssueTerminalState(capturedIssueKey, {
+        groups: [...currentState.groups, newGroup],
+        activeGroupId: groupId,
+        isCollapsed: false,
+      });
+
+      // Only update local state if still on the same issue
+      if (issueKeyRef.current === capturedIssueKey) {
+        setGroupsState(prev => [...prev, newGroup]);
+        setActiveGroupIdState(groupId);
+        setIsCollapsedState(false);
+      }
     } catch (e) {
       console.error("Failed to create PTY:", e);
     }
   };
 
-  const addTerminalToGroup = async (groupId: number) => {
-    const currentWorktree = getIssueWorktree(projectKey, issueKey);
+  const addTerminalToGroup = async (targetGroupId: number) => {
+    // Capture issueKey at the start of this function
+    const capturedIssueKey = issueKey;
+
+    const currentWorktree = getIssueWorktree(projectKey, capturedIssueKey);
     const cwd = currentWorktree?.path;
     if (!cwd) return;
     try {
       const sessionId: number = await invoke("create_pty_session", { rows: 24, cols: 80, cwd });
-      setGroups(prev => prev.map(g =>
-        g.id === groupId ? { ...g, terminals: [...g.terminals, sessionId], activeTerminal: sessionId } : g
-      ));
+
+      // Always save to global state for the captured issue
+      const currentState = getIssueTerminalState(capturedIssueKey);
+      const updatedGroups = currentState.groups.map(g =>
+        g.id === targetGroupId ? { ...g, terminals: [...g.terminals, sessionId], activeTerminal: sessionId } : g
+      );
+      setIssueTerminalState(capturedIssueKey, { groups: updatedGroups });
+
+      // Only update local state if still on the same issue
+      if (issueKeyRef.current === capturedIssueKey) {
+        setGroupsState(updatedGroups);
+      }
     } catch (e) {
       console.error("Failed to create PTY:", e);
     }
@@ -4086,7 +4147,12 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
         </div>
         {!isCollapsed && (
           <div className="terminal-worktree-setup">
-            {isCreatingWorktree ? (
+            {isDeletingWorktree ? (
+              <div className="terminal-worktree-loading">
+                <div className="terminal-worktree-spinner" />
+                <div className="terminal-worktree-loading-text">Deleting worktree...</div>
+              </div>
+            ) : isCreatingWorktree ? (
               <div className="terminal-worktree-loading">
                 <div className="terminal-worktree-spinner" />
                 <div className="terminal-worktree-loading-text">Setting up worktree...</div>
@@ -4235,14 +4301,9 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
               </button>
               {showWorktreePopover && (
                 <>
-                  <div className="terminal-popover-backdrop" onClick={() => { if (!isDeletingWorktree) { setShowWorktreePopover(false); setConfirmDelete(false); } }} />
+                  <div className="terminal-popover-backdrop" onClick={() => { setShowWorktreePopover(false); setConfirmDelete(false); }} />
                   <div className="terminal-worktree-popover">
-                    {isDeletingWorktree ? (
-                      <div className="terminal-popover-loading">
-                        <div className="terminal-worktree-spinner" />
-                        <span>Deleting worktree...</span>
-                      </div>
-                    ) : confirmDelete ? (
+                    {confirmDelete ? (
                       <>
                         <div className="terminal-popover-header">Delete Worktree?</div>
                         <div className="terminal-popover-confirm-msg">
@@ -4457,7 +4518,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
     if (refreshTrigger > 0) {
       fetchIssueDetail(issueKey).then(setIssue).catch(console.error);
     }
-  }, [refreshTrigger]);
+  }, [refreshTrigger, issueKey]);
 
   const startEdit = async (field: string) => {
     if (!issue) return;
@@ -4561,7 +4622,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           <div className="skeleton skeleton-line" />
           <div className="skeleton skeleton-line shorter" />
         </div>
-        {showTerminal && <TerminalPanel issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
+        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
       </div>
     );
   }
@@ -4572,7 +4633,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         <div className="issue-detail scrollable">
           <div className="issue-error">Failed to load issue</div>
         </div>
-        {showTerminal && <TerminalPanel issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
+        {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
       </div>
     );
   }
@@ -5266,7 +5327,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         </div>
       </div>
       </div>
-      {showTerminal && <TerminalPanel issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
+      {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} />}
     </div>
   );
 }

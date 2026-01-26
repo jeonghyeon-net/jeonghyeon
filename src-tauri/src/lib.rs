@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -12,7 +12,8 @@ use tauri::{async_runtime::Mutex as AsyncMutex, State, AppHandle, Emitter};
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
-    _reader_thread: thread::JoinHandle<()>,
+    child: Box<dyn Child + Send + Sync>,
+    reader_thread: thread::JoinHandle<()>,
 }
 
 pub struct PtyState {
@@ -55,7 +56,7 @@ async fn create_pty_session(
     // Set TERM for proper escape sequence handling
     cmd.env("TERM", "xterm-256color");
 
-    pair.slave.spawn_command(cmd).map_err(|e| format!("Failed to spawn command: {}", e))?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| format!("Failed to spawn command: {}", e))?;
 
     // Drop slave - we only need master
     drop(pair.slave);
@@ -92,7 +93,8 @@ async fn create_pty_session(
     let session = PtySession {
         master: pair.master,
         writer,
-        _reader_thread: reader_thread,
+        child,
+        reader_thread,
     };
 
     let mut sessions = state.sessions.lock().await;
@@ -144,17 +146,30 @@ async fn resize_pty(
 
 #[tauri::command]
 async fn close_pty_session(state: State<'_, PtyState>, session_id: u32) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().await;
-    if sessions.remove(&session_id).is_some() {
+    let session = {
+        let mut sessions = state.sessions.lock().await;
+        sessions.remove(&session_id)
+    };
+
+    if let Some(mut session) = session {
+        // Kill and drop everything - don't wait
+        let _ = session.child.kill();
+        drop(session.master);
+        drop(session.writer);
+        // Reader thread and child process will clean up on their own
         Ok(())
     } else {
-        Err("Session not found".to_string())
+        Ok(())
     }
 }
 
 #[tauri::command]
-fn check_path_exists(path: String) -> bool {
-    Path::new(&path).exists()
+async fn check_path_exists(path: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
+        Path::new(&path).exists()
+    })
+    .await
+    .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -186,20 +201,28 @@ fn get_home_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn read_file(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))
+async fn read_file(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read file: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn write_file(path: String, content: String) -> Result<(), String> {
-    // Ensure parent directory exists
-    if let Some(parent) = Path::new(&path).parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
-    std::fs::write(&path, content)
-        .map_err(|e| format!("Failed to write file: {}", e))
+async fn write_file(path: String, content: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // Ensure parent directory exists
+        if let Some(parent) = Path::new(&path).parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        std::fs::write(&path, content)
+            .map_err(|e| format!("Failed to write file: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -210,41 +233,67 @@ fn get_app_data_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_files_in_dir(path: String) -> Result<Vec<String>, String> {
-    let dir = Path::new(&path);
-    if !dir.exists() {
-        return Ok(vec![]);
-    }
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+async fn list_files_in_dir(path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = Path::new(&path);
+        if !dir.exists() {
+            return Ok(vec![]);
+        }
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| format!("Failed to read directory: {}", e))?;
 
-    let mut files = Vec::new();
-    for entry in entries {
-        if let Ok(entry) = entry {
-            if let Some(name) = entry.file_name().to_str() {
-                files.push(name.to_string());
+        let mut files = Vec::new();
+        for entry in entries {
+            if let Ok(entry) = entry {
+                if let Some(name) = entry.file_name().to_str() {
+                    files.push(name.to_string());
+                }
             }
         }
-    }
-    Ok(files)
+        Ok(files)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn delete_file(path: String) -> Result<(), String> {
-    std::fs::remove_file(&path)
-        .map_err(|e| format!("Failed to delete file: {}", e))
+async fn delete_file(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("Failed to delete file: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn delete_directory(path: String) -> Result<(), String> {
-    std::fs::remove_dir_all(&path)
-        .map_err(|e| format!("Failed to delete directory: {}", e))
+async fn delete_directory(path: String) -> Result<(), String> {
+    // Use system rm -rf which is much faster than Rust's remove_dir_all for large directories
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = Command::new("rm")
+            .args(["-rf", &path])
+            .output()
+            .map_err(|e| format!("Failed to execute rm: {}", e))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("rm -rf failed: {}", stderr))
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn create_dir_all(path: String) -> Result<(), String> {
-    std::fs::create_dir_all(&path)
-        .map_err(|e| format!("Failed to create directory: {}", e))
+async fn create_dir_all(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::create_dir_all(&path)
+            .map_err(|e| format!("Failed to create directory: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
