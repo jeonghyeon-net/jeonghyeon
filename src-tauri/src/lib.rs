@@ -8,6 +8,7 @@ use std::{
     path::Path,
 };
 use tauri::{async_runtime::Mutex as AsyncMutex, State, AppHandle, Emitter};
+use sysinfo::{System, Components, Networks};
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -427,6 +428,99 @@ async fn open_terminal_at(path: String) -> Result<(), String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+#[derive(serde::Serialize)]
+struct SystemStats {
+    cpu_usage: f32,
+    memory_usage: f32,
+    temperature: Option<f32>,
+    network_rx: u64,  // bytes received per second
+    network_tx: u64,  // bytes transmitted per second
+}
+
+// Store previous network stats for calculating rate
+static PREV_NETWORK: std::sync::Mutex<Option<(u64, u64, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+// Persistent instances for accurate measurements
+use std::sync::OnceLock;
+static SYSTEM: OnceLock<std::sync::Mutex<System>> = OnceLock::new();
+static COMPONENTS: OnceLock<std::sync::Mutex<Components>> = OnceLock::new();
+static NETWORKS: OnceLock<std::sync::Mutex<Networks>> = OnceLock::new();
+
+#[tauri::command]
+async fn get_system_stats() -> Result<SystemStats, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let sys_mutex = SYSTEM.get_or_init(|| std::sync::Mutex::new(System::new_all()));
+        let mut sys = sys_mutex.lock().unwrap();
+
+        sys.refresh_memory();
+        sys.refresh_cpu_usage();
+
+        let cpu_usage = sys.global_cpu_usage();
+        let memory_usage = (sys.used_memory() as f32 / sys.total_memory() as f32) * 100.0;
+
+        // Get temperature from components
+        let comp_mutex = COMPONENTS.get_or_init(|| std::sync::Mutex::new(Components::new_with_refreshed_list()));
+        let mut components = comp_mutex.lock().unwrap();
+        components.refresh();
+        let temperature = components.iter()
+            .find(|c| c.label().contains("CPU") || c.label().contains("Die"))
+            .map(|c| c.temperature());
+        drop(components);
+
+        // Get network stats
+        let net_mutex = NETWORKS.get_or_init(|| std::sync::Mutex::new(Networks::new_with_refreshed_list()));
+        let mut networks = net_mutex.lock().unwrap();
+        networks.refresh();
+        let (total_rx, total_tx): (u64, u64) = networks.iter()
+            .map(|(_, data)| (data.total_received(), data.total_transmitted()))
+            .fold((0, 0), |(rx, tx), (r, t)| (rx + r, tx + t));
+        drop(networks);
+
+        let now = std::time::Instant::now();
+        let (network_rx, network_tx) = {
+            let mut prev = PREV_NETWORK.lock().unwrap();
+            if let Some((prev_rx, prev_tx, prev_time)) = *prev {
+                let elapsed = now.duration_since(prev_time).as_secs_f64();
+                if elapsed > 0.0 {
+                    let rx_rate = ((total_rx.saturating_sub(prev_rx)) as f64 / elapsed) as u64;
+                    let tx_rate = ((total_tx.saturating_sub(prev_tx)) as f64 / elapsed) as u64;
+                    *prev = Some((total_rx, total_tx, now));
+                    (rx_rate, tx_rate)
+                } else {
+                    (0, 0)
+                }
+            } else {
+                *prev = Some((total_rx, total_tx, now));
+                (0, 0)
+            }
+        };
+
+        Ok(SystemStats {
+            cpu_usage,
+            memory_usage,
+            temperature,
+            network_rx,
+            network_tx,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+async fn open_activity_monitor() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        Command::new("open")
+            .arg("-a")
+            .arg("Activity Monitor")
+            .spawn()
+            .map_err(|e| format!("Failed to open Activity Monitor: {}", e))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -451,7 +545,9 @@ pub fn run() {
             list_files_in_dir,
             delete_file,
             delete_directory,
-            open_terminal_at
+            open_terminal_at,
+            get_system_stats,
+            open_activity_monitor
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -5597,6 +5597,108 @@ function QuickMemo() {
   );
 }
 
+// System Stats Display Component
+interface SystemStats {
+  cpu_usage: number;
+  memory_usage: number;
+  temperature: number | null;
+  network_rx: number;
+  network_tx: number;
+}
+
+const CpuIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3" />
+  </svg>
+);
+
+const MemoryIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <path d="M6 6v-2M10 6v-2M14 6v-2M18 6v-2M6 18v2M10 18v2M14 18v2M18 18v2" />
+  </svg>
+);
+
+const TempIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
+  </svg>
+);
+
+const NetDownIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 5v14M5 12l7 7 7-7" />
+  </svg>
+);
+
+const NetUpIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 19V5M5 12l7-7 7 7" />
+  </svg>
+);
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)}MB`;
+  if (bytes < 1024 ** 4) return `${(bytes / 1024 ** 3).toFixed(1)}GB`;
+  return `${(bytes / 1024 ** 4).toFixed(1)}TB`;
+}
+
+function SystemStatsDisplay() {
+  const [stats, setStats] = useState<SystemStats | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const poll = async () => {
+      while (mounted) {
+        try {
+          const data = await invoke<SystemStats>("get_system_stats");
+          if (mounted) setStats(data);
+        } catch {}
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    };
+    poll();
+    return () => { mounted = false; };
+  }, []);
+
+  if (!stats) return null;
+
+  const openActivityMonitor = () => {
+    invoke("open_activity_monitor").catch(console.error);
+  };
+
+  return (
+    <div className="system-stats" onClick={openActivityMonitor}>
+      <span className="system-stat" title="CPU Usage">
+        <CpuIcon />
+        <span className="system-stat-value">{stats.cpu_usage.toFixed(0)}%</span>
+      </span>
+      <span className="system-stat" title="Memory Usage">
+        <MemoryIcon />
+        <span className="system-stat-value">{stats.memory_usage.toFixed(0)}%</span>
+      </span>
+      {stats.temperature != null && (
+        <span className="system-stat" title="Temperature">
+          <TempIcon />
+          <span className="system-stat-value">{stats.temperature.toFixed(0)}°</span>
+        </span>
+      )}
+      <span className="system-stat" title="Download">
+        <NetDownIcon />
+        <span className="system-stat-value network">{formatBytes(stats.network_rx)}/s</span>
+      </span>
+      <span className="system-stat" title="Upload">
+        <NetUpIcon />
+        <span className="system-stat-value network">{formatBytes(stats.network_tx)}/s</span>
+      </span>
+    </div>
+  );
+}
+
 // Pomodoro Timer Component
 function PomodoroTimer() {
   const [settings, setSettings] = useState<PomodoroSettings>(getPomodoroSettings);
@@ -6267,6 +6369,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
         <ReviewRequestedPRs />
       </div>
       <div className="status-bar-right">
+        <SystemStatsDisplay />
         <button className="status-bar-btn" onClick={() => {
           setShowGlobalSettings(true);
                 setSettingsProject(null);
