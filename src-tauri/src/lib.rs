@@ -236,6 +236,12 @@ fn delete_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn delete_directory(path: String) -> Result<(), String> {
+    std::fs::remove_dir_all(&path)
+        .map_err(|e| format!("Failed to delete directory: {}", e))
+}
+
+#[tauri::command]
 fn create_dir_all(path: String) -> Result<(), String> {
     std::fs::create_dir_all(&path)
         .map_err(|e| format!("Failed to create directory: {}", e))
@@ -283,7 +289,8 @@ pub fn run() {
             write_file,
             get_app_data_dir,
             list_files_in_dir,
-            delete_file
+            delete_file,
+            delete_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

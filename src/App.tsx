@@ -3484,7 +3484,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           if (cancelled) return;
           const branchList = (branchOutput as string)
             .split("\n")
-            .map(b => b.trim().replace(/^\* /, ""))
+            .map(b => b.trim().replace(/^[\*\+]\s*/, ""))
             .filter(b => b && !b.startsWith("remotes/origin/HEAD"));
           setBranches(branchList);
           const current = (currentOutput as string).trim();
@@ -3642,10 +3642,33 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
       }
 
       // Remove worktree using git
+      try {
+        await invoke("run_git_command", {
+          cwd: repoPath,
+          args: ["worktree", "remove", worktreeInfo.path, "--force"],
+        });
+      } catch (e) {
+        // If git worktree remove fails, manually delete the directory
+        console.warn("git worktree remove failed, removing directory manually:", e);
+        await invoke("delete_directory", { path: worktreeInfo.path }).catch(() => {});
+        // Prune stale worktrees
+        await invoke("run_git_command", {
+          cwd: repoPath,
+          args: ["worktree", "prune"],
+        }).catch(() => {});
+      }
+
+      // Delete branch from origin
       await invoke("run_git_command", {
         cwd: repoPath,
-        args: ["worktree", "remove", worktreeInfo.path, "--force"],
-      });
+        args: ["push", "origin", "--delete", worktreeInfo.branch],
+      }).catch(e => console.warn("Failed to delete remote branch:", e));
+
+      // Delete local branch
+      await invoke("run_git_command", {
+        cwd: repoPath,
+        args: ["branch", "-D", worktreeInfo.branch],
+      }).catch(e => console.warn("Failed to delete local branch:", e));
     } catch (e) {
       console.error("Failed to remove git worktree:", e);
       // Continue anyway - might already be removed or have issues
