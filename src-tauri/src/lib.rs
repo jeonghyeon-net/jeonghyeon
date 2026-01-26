@@ -13,6 +13,7 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
+    child_pid: u32,
     _reader_thread: thread::JoinHandle<()>,
 }
 
@@ -90,10 +91,12 @@ async fn create_pty_session(
         }
     });
 
+    let child_pid = child.process_id().unwrap_or(0);
     let session = PtySession {
         master: pair.master,
         writer,
         child,
+        child_pid,
         _reader_thread: reader_thread,
     };
 
@@ -161,6 +164,86 @@ async fn close_pty_session(state: State<'_, PtyState>, session_id: u32) -> Resul
     } else {
         Ok(())
     }
+}
+
+#[tauri::command]
+async fn get_pty_foreground_process(
+    state: State<'_, PtyState>,
+    session_id: u32,
+) -> Result<String, String> {
+    let child_pid = {
+        let sessions = state.sessions.lock().await;
+        sessions.get(&session_id).map(|s| s.child_pid)
+    };
+
+    let Some(shell_pid) = child_pid else {
+        return Err("Session not found".to_string());
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // Get shell name first
+        let shell_name = Command::new("ps")
+            .args(["-o", "comm=", "-p", &shell_pid.to_string()])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| {
+                let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                let name = name.split('/').last().unwrap_or(&name);
+                // Remove leading '-' from login shells (e.g., "-zsh" -> "zsh")
+                name.strip_prefix('-').unwrap_or(name).to_string()
+            })
+            .unwrap_or_else(|| "shell".to_string());
+
+        if shell_pid == 0 {
+            return shell_name;
+        }
+
+        // Get shell's tty
+        let tty = Command::new("ps")
+            .args(["-o", "tty=", "-p", &shell_pid.to_string()])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+        if tty.is_empty() || tty == "??" {
+            return shell_name;
+        }
+
+        // Find foreground process on this tty (stat contains '+')
+        let ps_output = Command::new("ps")
+            .args(["-t", &tty, "-o", "pid=,stat=,comm="])
+            .output();
+
+        if let Ok(output) = ps_output {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 3 {
+                        let pid = parts[0];
+                        let stat = parts[1];
+                        let comm = parts[2];
+
+                        // Foreground process has '+' in stat and is not the shell
+                        if stat.contains('+') && pid != shell_pid.to_string() {
+                            let name = comm.split('/').last().unwrap_or(comm);
+                            let name = name.strip_prefix('-').unwrap_or(name);
+                            if name != shell_name {
+                                return name.to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        shell_name
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))
 }
 
 #[tauri::command]
@@ -356,6 +439,7 @@ pub fn run() {
             write_to_pty,
             resize_pty,
             close_pty_session,
+            get_pty_foreground_process,
             check_path_exists,
             run_git_command,
             run_gh_command,

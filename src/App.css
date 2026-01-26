@@ -2782,20 +2782,25 @@ html, body, #root {
   flex-direction: column;
   min-width: 0;
   max-width: 100%;
-  border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
-.terminal-group:last-child {
-  border-right: none;
+.terminal-group-resize-handle {
+  width: 1px;
+  cursor: col-resize;
+  background: var(--border);
+  flex-shrink: 0;
+  position: relative;
 }
 
-.terminal-group-resize-handle {
-  width: 4px;
-  cursor: col-resize;
+.terminal-group-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -2px;
+  width: 5px;
   background: transparent;
-  transition: background 0.15s;
-  flex-shrink: 0;
 }
 
 .terminal-group-resize-handle:hover,
@@ -2809,7 +2814,7 @@ html, body, #root {
   align-items: center;
   justify-content: space-between;
   height: 28px;
-  padding: 0 4px 0 8px;
+  padding: 0 4px 0 0;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -2817,24 +2822,25 @@ html, body, #root {
 
 .terminal-group-tabs {
   display: flex;
-  align-items: center;
-  gap: 2px;
+  align-items: stretch;
   overflow-x: auto;
   flex: 1;
+  height: 100%;
 }
 
 .terminal-group-tab {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 20px;
-  padding: 0 6px;
+  justify-content: center;
+  position: relative;
+  padding: 0 24px;
   font-size: var(--terminal-tab-font-size);
   color: var(--text-muted);
   background: transparent;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   cursor: pointer !important;
   flex-shrink: 0;
+  border-right: 1px solid var(--border);
 }
 
 .terminal-group-tab:hover {
@@ -2843,12 +2849,14 @@ html, body, #root {
 }
 
 .terminal-group-tab.active {
-  color: var(--text);
-  background: var(--bg-active-tab);
+  color: var(--text-bright);
+  background: var(--bg-hover);
 }
 
 .terminal-group-tab-close {
-  display: none;
+  position: absolute;
+  right: 4px;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: 1px;
@@ -2856,10 +2864,11 @@ html, body, #root {
   border: none;
   color: var(--text-muted);
   cursor: pointer !important;
+  opacity: 0;
 }
 
 .terminal-group-tab:hover .terminal-group-tab-close {
-  display: flex;
+  opacity: 1;
 }
 
 .terminal-group-tab-close:hover {

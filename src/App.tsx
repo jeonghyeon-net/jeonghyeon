@@ -297,7 +297,7 @@ type ThemeConfig = {
 };
 
 // Keyboard shortcuts
-type ShortcutKey = "toggleSidebar" | "toggleTerminal" | "newTerminalTab" | "newTerminalGroup";
+type ShortcutKey = "toggleSidebar" | "toggleTerminal" | "newTerminalTab" | "newTerminalGroup" | "prevTerminalTab" | "nextTerminalTab" | "closeTerminalTab";
 
 type Shortcut = {
   key: string;
@@ -314,6 +314,9 @@ const DEFAULT_SHORTCUTS: ShortcutConfig = {
   toggleTerminal: { key: "j", meta: true, ctrl: false, shift: false, alt: false },
   newTerminalTab: { key: "t", meta: true, ctrl: false, shift: false, alt: false },
   newTerminalGroup: { key: "\\", meta: true, ctrl: false, shift: false, alt: false },
+  prevTerminalTab: { key: "[", meta: true, ctrl: false, shift: true, alt: false },
+  nextTerminalTab: { key: "]", meta: true, ctrl: false, shift: true, alt: false },
+  closeTerminalTab: { key: "w", meta: true, ctrl: false, shift: false, alt: false },
 };
 
 const SHORTCUT_LABELS: Record<ShortcutKey, string> = {
@@ -321,6 +324,9 @@ const SHORTCUT_LABELS: Record<ShortcutKey, string> = {
   toggleTerminal: "Toggle Terminal",
   newTerminalTab: "New Terminal Tab",
   newTerminalGroup: "New Terminal Group",
+  prevTerminalTab: "Previous Terminal Tab",
+  nextTerminalTab: "Next Terminal Tab",
+  closeTerminalTab: "Close Terminal Tab",
 };
 
 // === Pomodoro Timer ===
@@ -3070,23 +3076,29 @@ const terminalCache = new Map<number, {
   fitAddon: FitAddon;
   cleanup?: () => void;
   onSessionEnd?: () => void;
+  onTitleChange?: (title: string) => void;
 }>();
 
-function TerminalInstance({ sessionId, fontSize, onSessionEnd }: {
+// Global terminal titles (sessionId -> title)
+const terminalTitles = new Map<number, string>();
+
+function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: {
   sessionId: number;
   fontSize: number;
   onSessionEnd?: () => void;
+  onTitleChange?: (title: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
 
-  // Update callback in cache
+  // Update callbacks in cache
   useEffect(() => {
     const cached = terminalCache.get(sessionId);
     if (cached) {
       cached.onSessionEnd = onSessionEnd;
+      cached.onTitleChange = onTitleChange;
     }
-  }, [sessionId, onSessionEnd]);
+  }, [sessionId, onSessionEnd, onTitleChange]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -3312,6 +3324,38 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd }: {
     let unlistenOutput: (() => void) | null = null;
     let unlistenEnd: (() => void) | null = null;
 
+    // Foreground process polling (250ms)
+    // Debounce to avoid flickering from short-lived processes
+    let lastTitle = "";
+    let pendingTitle = "";
+    let pendingCount = 0;
+    let polling = true;
+    const pollForegroundProcess = async () => {
+      while (polling) {
+        try {
+          const name = await invoke<string>("get_pty_foreground_process", { sessionId });
+          if (name && name !== lastTitle) {
+            // Require same value twice in a row to update (filters out short-lived processes)
+            if (name === pendingTitle) {
+              pendingCount++;
+              if (pendingCount >= 2) {
+                lastTitle = name;
+                terminalTitles.set(sessionId, name);
+                const cached = terminalCache.get(sessionId);
+                cached?.onTitleChange?.(name);
+                pendingCount = 0;
+              }
+            } else {
+              pendingTitle = name;
+              pendingCount = 1;
+            }
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 150));
+      }
+    };
+    pollForegroundProcess();
+
     const setupListeners = async () => {
       unlistenOutput = await listen<number[]>(`pty-output-${sessionId}`, (event) => {
         const data = new Uint8Array(event.payload);
@@ -3339,7 +3383,7 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd }: {
     setupListeners();
 
     // Cache it
-    terminalCache.set(sessionId, { term, fitAddon, onSessionEnd });
+    terminalCache.set(sessionId, { term, fitAddon, onSessionEnd, onTitleChange });
 
     return () => {};
   }, [sessionId]);
@@ -3389,6 +3433,16 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd }: {
   );
 }
 
+// Extract display name from terminal title (last path component or command name)
+function getTerminalDisplayName(title: string | undefined): string {
+  if (!title) return "zsh";
+  // If it's a path, get the last component
+  const parts = title.split(/[/:\\]/);
+  const last = parts[parts.length - 1] || title;
+  // Limit length
+  return last.length > 20 ? last.slice(0, 20) + "…" : last;
+}
+
 function TerminalGroupView({
   group,
   isActive,
@@ -3408,6 +3462,20 @@ function TerminalGroupView({
   onCloseGroup: () => void;
   fontSize: number;
 }) {
+  const [titles, setTitles] = useState<Record<number, string>>(() => {
+    // Initialize from global cache
+    const initial: Record<number, string> = {};
+    for (const id of group.terminals) {
+      const cached = terminalTitles.get(id);
+      if (cached) initial[id] = cached;
+    }
+    return initial;
+  });
+
+  const handleTitleChange = useCallback((sessionId: number, title: string) => {
+    setTitles(prev => ({ ...prev, [sessionId]: title }));
+  }, []);
+
   return (
     <div className={`terminal-group ${isActive ? "active" : ""}`} style={{ flex: group.flex }} onClick={onActivate}>
       <div className="terminal-group-header">
@@ -3418,7 +3486,7 @@ function TerminalGroupView({
               className={`terminal-group-tab ${group.activeTerminal === id ? "active" : ""}`}
               onClick={(e) => { e.stopPropagation(); onSelectTerminal(id); }}
             >
-              <span>zsh</span>
+              <span>{getTerminalDisplayName(titles[id])}</span>
               <button
                 className="terminal-group-tab-close"
                 onClick={(e) => { e.stopPropagation(); onCloseTerminal(id); }}
@@ -3440,7 +3508,7 @@ function TerminalGroupView({
       <div className="terminal-group-content">
         {group.terminals.map((id) => (
           <div key={id} style={{ display: group.activeTerminal === id ? 'block' : 'none', position: 'relative', flex: 1, width: '100%', height: '100%' }}>
-            <TerminalInstance sessionId={id} fontSize={fontSize} onSessionEnd={() => onCloseTerminal(id)} />
+            <TerminalInstance sessionId={id} fontSize={fontSize} onSessionEnd={() => onCloseTerminal(id)} onTitleChange={(title) => handleTitleChange(id, title)} />
           </div>
         ))}
       </div>
@@ -4133,11 +4201,39 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
         e.preventDefault();
         e.stopPropagation();
         if (terminalPath && activeGroupId !== null) addTerminalToGroup(activeGroupId);
+      } else if (matchesShortcut(e, shortcuts.prevTerminalTab)) {
+        e.preventDefault();
+        if (activeGroupId !== null) {
+          setGroups(prev => prev.map(g => {
+            if (g.id !== activeGroupId || g.terminals.length <= 1) return g;
+            const idx = g.terminals.indexOf(g.activeTerminal!);
+            const newIdx = idx <= 0 ? g.terminals.length - 1 : idx - 1;
+            return { ...g, activeTerminal: g.terminals[newIdx] };
+          }));
+        }
+      } else if (matchesShortcut(e, shortcuts.nextTerminalTab)) {
+        e.preventDefault();
+        if (activeGroupId !== null) {
+          setGroups(prev => prev.map(g => {
+            if (g.id !== activeGroupId || g.terminals.length <= 1) return g;
+            const idx = g.terminals.indexOf(g.activeTerminal!);
+            const newIdx = idx >= g.terminals.length - 1 ? 0 : idx + 1;
+            return { ...g, activeTerminal: g.terminals[newIdx] };
+          }));
+        }
+      } else if (matchesShortcut(e, shortcuts.closeTerminalTab)) {
+        e.preventDefault();
+        if (activeGroupId !== null) {
+          const group = groups.find(g => g.id === activeGroupId);
+          if (group?.activeTerminal != null) {
+            closeTerminal(activeGroupId, group.activeTerminal);
+          }
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [terminalPath, activeGroupId]);
+  }, [terminalPath, activeGroupId, groups]);
 
   // Show connect repository UI if no repo path is set
   if (!repoPath) {

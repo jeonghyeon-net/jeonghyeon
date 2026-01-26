@@ -1867,6 +1867,7 @@ name = "jeonghyeon"
 version = "0.2.3"
 dependencies = [
  "dirs",
+ "libc",
  "portable-pty",
  "serde",
  "serde_json",
