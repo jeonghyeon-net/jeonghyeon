@@ -2004,6 +2004,46 @@ html, body, #root {
   background-position: right 8px center;
 }
 
+.terminal-worktree-branch-input {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.terminal-worktree-branch-input input,
+.terminal-worktree-branch-input select {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-worktree-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.terminal-worktree-mode-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.terminal-worktree-mode-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
 .terminal-worktree-error {
   font-size: var(--font-size-sm);
   color: var(--error);

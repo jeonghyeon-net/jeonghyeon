@@ -3139,6 +3139,8 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [isCreatingWorktree, setIsCreatingWorktree] = useState(false);
   const [worktreeError, setWorktreeError] = useState<string | null>(null);
+  const [branchMode, setBranchMode] = useState<"new" | "existing">("new");
+  const [selectedExistingBranch, setSelectedExistingBranch] = useState("");
 
   // Worktree popover state
   const [showWorktreePopover, setShowWorktreePopover] = useState(false);
@@ -3196,12 +3198,13 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     }
   }, [issueKey, projectKey]);
 
-  // Load branches when repoPath is set
+  // Load branches when repoPath is set or issue changes
   useEffect(() => {
     if (!repoPath || worktreeInfo) return;
     setIsLoadingBranches(true);
     setBranches([]);
     setCurrentBranch("");
+    setBaseBranch("");
 
     Promise.all([
       invoke("run_git_command", { cwd: repoPath, args: ["branch", "-a"] }),
@@ -3221,11 +3224,14 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     }).finally(() => {
       setIsLoadingBranches(false);
     });
-  }, [repoPath, worktreeInfo]);
+  }, [repoPath, worktreeInfo, issueKey]);
 
   // Create worktree
   const createWorktree = async () => {
-    if (!repoPath || !branchName || !baseBranch) return;
+    const targetBranch = branchMode === "new" ? branchName : selectedExistingBranch;
+    if (!repoPath || !targetBranch) return;
+    if (branchMode === "new" && !baseBranch) return;
+
     setIsCreatingWorktree(true);
     setWorktreeError(null);
 
@@ -3233,7 +3239,14 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     await new Promise(resolve => setTimeout(resolve, 50));
 
     // Sanitize branch name for folder (replace / with -)
-    const folderName = branchName.replace(/\//g, "-");
+    // For remote branches like "remotes/origin/branch", extract just the branch name
+    let folderBranchName = targetBranch;
+    if (folderBranchName.startsWith("remotes/")) {
+      // Extract branch name after origin/ (e.g., "remotes/origin/feature/test" -> "feature/test")
+      const parts = folderBranchName.split("/");
+      folderBranchName = parts.slice(2).join("/");
+    }
+    const folderName = folderBranchName.replace(/\//g, "-");
 
     try {
       const homeDir: string = await invoke("get_home_dir");
@@ -3245,7 +3258,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
       const exists: boolean = await invoke("check_path_exists", { path: worktreePath });
       if (exists) {
         // Path exists, just use it
-        const info = { path: worktreePath, branch: branchName };
+        const info = { path: worktreePath, branch: folderBranchName };
         saveIssueWorktree(projectKey, issueKey, info);
         setWorktreeInfo(info);
         return;
@@ -3254,36 +3267,70 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
       // Create directory structure
       await invoke("create_dir_all", { path: worktreeDir });
 
-      // Create worktree with new branch
-      await invoke("run_git_command", {
-        cwd: repoPath,
-        args: ["worktree", "add", "-b", branchName, worktreePath, baseBranch],
-      });
+      if (branchMode === "new") {
+        // Create worktree with new branch
+        try {
+          await invoke("run_git_command", {
+            cwd: repoPath,
+            args: ["worktree", "add", "-b", targetBranch, worktreePath, baseBranch],
+          });
+        } catch (e: any) {
+          // Branch might already exist, try without -b flag
+          console.warn("Failed with -b flag, trying existing branch:", e);
+          await invoke("run_git_command", {
+            cwd: repoPath,
+            args: ["worktree", "add", worktreePath, targetBranch],
+          });
+        }
 
-      const info = { path: worktreePath, branch: branchName };
-      saveIssueWorktree(projectKey, issueKey, info);
-      justCreatedWorktreeRef.current = true; // Run ./setup.sh on first terminal
-      setWorktreeInfo(info);
+        const info = { path: worktreePath, branch: targetBranch };
+        saveIssueWorktree(projectKey, issueKey, info);
+        justCreatedWorktreeRef.current = true;
+        setWorktreeInfo(info);
+      } else {
+        // Use existing branch
+        // For remote branches, we need to handle them differently
+        if (targetBranch.startsWith("remotes/")) {
+          // Extract the branch name without remotes/origin/ prefix
+          const parts = targetBranch.split("/");
+          const remoteName = parts[1]; // e.g., "origin"
+          const remoteBranchName = parts.slice(2).join("/");
+
+          try {
+            // Try creating worktree tracking the remote branch
+            await invoke("run_git_command", {
+              cwd: repoPath,
+              args: ["worktree", "add", "--track", "-b", remoteBranchName, worktreePath, `${remoteName}/${remoteBranchName}`],
+            });
+          } catch (e: any) {
+            // Local branch with same name might already exist, try without -b
+            console.warn("Failed with --track -b, trying existing local branch:", e);
+            await invoke("run_git_command", {
+              cwd: repoPath,
+              args: ["worktree", "add", worktreePath, remoteBranchName],
+            });
+          }
+
+          const info = { path: worktreePath, branch: remoteBranchName };
+          saveIssueWorktree(projectKey, issueKey, info);
+          justCreatedWorktreeRef.current = true;
+          setWorktreeInfo(info);
+        } else {
+          // Local branch
+          await invoke("run_git_command", {
+            cwd: repoPath,
+            args: ["worktree", "add", worktreePath, targetBranch],
+          });
+
+          const info = { path: worktreePath, branch: targetBranch };
+          saveIssueWorktree(projectKey, issueKey, info);
+          justCreatedWorktreeRef.current = true;
+          setWorktreeInfo(info);
+        }
+      }
     } catch (e: any) {
       console.error("Failed to create worktree:", e);
-      // Try without -b flag (branch might already exist)
-      try {
-        const homeDir: string = await invoke("get_home_dir");
-        const repoFolderName = repoPath.split("/").pop() || "repo";
-        const worktreePath = `${homeDir}/.jeonghyeon/${repoFolderName}/${folderName}`;
-
-        await invoke("run_git_command", {
-          cwd: repoPath,
-          args: ["worktree", "add", worktreePath, branchName],
-        });
-
-        const info = { path: worktreePath, branch: branchName };
-        saveIssueWorktree(projectKey, issueKey, info);
-        justCreatedWorktreeRef.current = true; // Run ./setup.sh on first terminal
-        setWorktreeInfo(info);
-      } catch (e2: any) {
-        setWorktreeError(e2?.toString() || "Failed to create worktree");
-      }
+      setWorktreeError(e?.toString() || "Failed to create worktree");
     } finally {
       setIsCreatingWorktree(false);
     }
@@ -3336,6 +3383,10 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setShowWorktreePopover(false);
     setConfirmDelete(false);
     setIsDeletingWorktree(false);
+    // Reset branch selection state
+    setBranchMode("new");
+    setSelectedExistingBranch("");
+    setBranchName("");
   };
 
   // Get effective terminal path (worktree path)
@@ -3397,6 +3448,9 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     setRepoPath(getProjectRepoPath(projectKey) || null);
     setWorktreeInfo(getIssueWorktree(projectKey, issueKey));
     setWorktreeError(null);
+    setBranchMode("new");
+    setSelectedExistingBranch("");
+    setBranchName("");
     setPrUrl(null);
     setPrState(null);
     setPrNumber(null);
@@ -3750,22 +3804,78 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
                   <div className="terminal-connect-desc">Create an isolated worktree for this issue</div>
                 </div>
                 <div className="terminal-worktree-form">
+                  {branchMode === "new" && (
+                    <div className="terminal-worktree-field">
+                      <label>Base Branch</label>
+                      <select value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)}>
+                        {branches.filter(b => !b.startsWith("remotes/")).length > 0 && (
+                          <optgroup label="Local">
+                            {branches.filter(b => !b.startsWith("remotes/")).map(b => (
+                              <option key={b} value={b}>{b}{b === currentBranch ? " (current)" : ""}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {branches.filter(b => b.startsWith("remotes/")).length > 0 && (
+                          <optgroup label="Remote">
+                            {branches.filter(b => b.startsWith("remotes/")).map(b => (
+                              <option key={b} value={b}>{b.replace("remotes/", "")}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    </div>
+                  )}
                   <div className="terminal-worktree-field">
-                    <label>Base Branch</label>
-                    <select value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)}>
-                      {branches.map(b => (
-                        <option key={b} value={b}>{b}{b === currentBranch ? " (current)" : ""}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="terminal-worktree-field">
-                    <label>Branch Name</label>
-                    <input
-                      type="text"
-                      value={branchName}
-                      onChange={(e) => setBranchName(e.target.value)}
-                      placeholder={issueKey.toLowerCase()}
-                    />
+                    <label>Branch</label>
+                    <div className="terminal-worktree-branch-input">
+                      {branchMode === "new" ? (
+                        <input
+                          type="text"
+                          value={branchName}
+                          onChange={(e) => setBranchName(e.target.value)}
+                          placeholder={issueKey.toLowerCase()}
+                        />
+                      ) : (
+                        <select
+                          value={selectedExistingBranch}
+                          onChange={(e) => setSelectedExistingBranch(e.target.value)}
+                        >
+                          <option value="">Select branch...</option>
+                          {branches.filter(b => !b.startsWith("remotes/")).length > 0 && (
+                            <optgroup label="Local">
+                              {branches.filter(b => !b.startsWith("remotes/")).map(b => (
+                                <option key={b} value={b}>{b}{b === currentBranch ? " (current)" : ""}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {branches.filter(b => b.startsWith("remotes/")).length > 0 && (
+                            <optgroup label="Remote">
+                              {branches.filter(b => b.startsWith("remotes/")).map(b => (
+                                <option key={b} value={b}>{b.replace("remotes/", "")}</option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                      )}
+                      <button
+                        className="terminal-worktree-mode-btn"
+                        onClick={() => setBranchMode(branchMode === "new" ? "existing" : "new")}
+                        title={branchMode === "new" ? "Use existing branch" : "Create new branch"}
+                      >
+                        {branchMode === "new" ? (
+                          <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                          </svg>
+                        ) : (
+                          <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 5v14M5 12h14" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                    <span className="terminal-worktree-mode-hint">
+                      {branchMode === "new" ? "Creating new branch" : "Using existing branch"}
+                    </span>
                   </div>
                   {worktreeError && (
                     <div className="terminal-worktree-error">{worktreeError}</div>
@@ -3773,12 +3883,19 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
                   <button
                     className="terminal-connect-btn"
                     onClick={createWorktree}
-                    disabled={!branchName || !baseBranch}
+                    disabled={branchMode === "new" ? (!branchName || !baseBranch) : !selectedExistingBranch}
                   >
                     Create Worktree
                   </button>
                   <div className="terminal-worktree-path-preview">
-                    <span>~/.jeonghyeon/{repoPath?.split("/").pop()}/{(branchName || "branch-name").replace(/\//g, "-")}</span>
+                    <span>~/.jeonghyeon/{repoPath?.split("/").pop()}/{(() => {
+                      const target = branchMode === "new" ? branchName : selectedExistingBranch;
+                      let displayName = target || "branch-name";
+                      if (displayName.startsWith("remotes/")) {
+                        displayName = displayName.split("/").slice(2).join("/");
+                      }
+                      return displayName.replace(/\//g, "-");
+                    })()}</span>
                   </div>
                 </div>
               </>
