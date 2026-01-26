@@ -5685,6 +5685,167 @@ function PomodoroTimer() {
   );
 }
 
+// Review Requested PRs Component
+type ReviewRequestedPR = {
+  number: number;
+  title: string;
+  url: string;
+  repository: { nameWithOwner: string };
+  author: { login: string };
+  createdAt: string;
+  updatedAt: string;
+};
+
+function ReviewRequestedPRs() {
+  const [prs, setPrs] = useState<ReviewRequestedPR[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showPopover, setShowPopover] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showCheck, setShowCheck] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const fetchIdRef = useRef(0);
+
+  const fetchPRs = useCallback(async () => {
+    const fetchId = ++fetchIdRef.current;
+    setLoading(true);
+    setShowCheck(false);
+    try {
+      const homeDir: string = await invoke("get_home_dir");
+      const result: string = await invoke("run_gh_command", {
+        cwd: homeDir,
+        args: ["search", "prs", "--review-requested=@me", "--state=open", "--archived=false", "--json", "number,title,url,repository,author,createdAt,updatedAt", "--limit", "30"]
+      });
+      if (fetchId !== fetchIdRef.current) return;
+      const data = JSON.parse(result);
+      setPrs(data);
+      setError(null);
+      setShowCheck(true);
+    } catch (e) {
+      if (fetchId !== fetchIdRef.current) return;
+      const errStr = String(e);
+      if (errStr.includes("gh auth login") || errStr.includes("not logged")) {
+        setError("gh CLI not authenticated. Run 'gh auth login' in terminal.");
+      } else if (errStr.includes("command not found") || errStr.includes("Failed to execute gh")) {
+        setError("gh CLI not installed. Install from https://cli.github.com");
+      } else {
+        setError(errStr.length > 100 ? errStr.slice(0, 100) + "..." : errStr);
+      }
+    } finally {
+      if (fetchId === fetchIdRef.current) setLoading(false);
+    }
+  }, []);
+
+  // Fetch on mount and every 5 minutes
+  useEffect(() => {
+    fetchPRs();
+    const interval = setInterval(fetchPRs, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [fetchPRs]);
+
+  // Click outside or Escape to close
+  useEffect(() => {
+    if (!showPopover) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setShowPopover(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowPopover(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showPopover]);
+
+  const formatTimeAgo = (date: Date | string | undefined | null) => {
+    if (!date) return "";
+    const d = typeof date === "string" ? new Date(date) : date;
+    if (isNaN(d.getTime())) return "";
+    const now = new Date();
+    const diff = now.getTime() - d.getTime();
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor(diff / (1000 * 60));
+    if (days > 0) return `${days}d ago`;
+    if (hours > 0) return `${hours}h ago`;
+    if (minutes > 0) return `${minutes}m ago`;
+    return "just now";
+  };
+
+  return (
+    <div className="review-prs" ref={popoverRef}>
+      <button
+        className={`review-prs-badge ${prs.length > 0 ? "has-prs" : ""}`}
+        onClick={() => setShowPopover(!showPopover)}
+        title={`${prs.length} PR${prs.length !== 1 ? "s" : ""} awaiting your review`}
+      >
+        <svg className="review-prs-icon" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"/>
+        </svg>
+        {prs.length > 0 && <span className="review-prs-count">{prs.length}</span>}
+      </button>
+      {showPopover && (
+        <div className={`review-prs-popover ${loading ? "loading" : ""}`}>
+          <div className="review-prs-header">
+            <span>Review Requested</span>
+            <button className="review-prs-refresh" onClick={fetchPRs} disabled={loading} title="Refresh">
+              {showCheck ? (
+                <svg className="review-prs-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" onAnimationEnd={() => setShowCheck(false)}>
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              ) : loading ? (
+                <span className="review-prs-dots">
+                  <span className="dot" />
+                  <span className="dot" />
+                  <span className="dot" />
+                </span>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path d="M3 3v5h5" />
+                </svg>
+              )}
+            </button>
+          </div>
+          <div className="review-prs-list">
+            {error ? (
+              <div className="review-prs-error">{error}</div>
+            ) : loading && prs.length === 0 ? (
+              <div className="review-prs-empty">Loading...</div>
+            ) : prs.length === 0 ? (
+              <div className="review-prs-empty">No PRs awaiting review</div>
+            ) : (
+              prs.map((pr) => (
+                <button
+                  key={`${pr.repository?.nameWithOwner || "unknown"}-${pr.number}`}
+                  className="review-pr-item"
+                  onClick={() => pr.url && openUrl(pr.url)}
+                >
+                  <div className="review-pr-title">
+                    <span className="review-pr-number">#{pr.number}</span>
+                    {pr.title || "Untitled"}
+                  </div>
+                  <div className="review-pr-meta">
+                    <span className="review-pr-repo">{pr.repository?.nameWithOwner || "unknown"}</span>
+                    {pr.author?.login && <span className="review-pr-author">by {pr.author.login}</span>}
+                    {pr.updatedAt && <span className="review-pr-time">{formatTimeAgo(pr.updatedAt)}</span>}
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MainApp({ onLogout }: { onLogout: () => void }) {
   const [sidebarWidth, setSidebarWidth] = useState(400);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -5953,6 +6114,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
       <div className="status-bar-left">
         <PomodoroTimer />
         <QuickMemo />
+        <ReviewRequestedPRs />
       </div>
       <div className="status-bar-right">
         <button className="status-bar-btn" onClick={() => {

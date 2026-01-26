@@ -175,9 +175,16 @@ async fn check_path_exists(path: String) -> bool {
 #[tauri::command]
 async fn run_git_command(cwd: String, args: Vec<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let path_env = std::env::var("PATH").unwrap_or_default();
+        let extended_path = format!(
+            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{}",
+            path_env
+        );
+
         let output = Command::new("git")
             .args(&args)
             .current_dir(&cwd)
+            .env("PATH", &extended_path)
             .output()
             .map_err(|e| format!("Failed to execute git: {}", e))?;
 
@@ -299,9 +306,16 @@ async fn create_dir_all(path: String) -> Result<(), String> {
 #[tauri::command]
 async fn run_gh_command(cwd: String, args: Vec<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let path_env = std::env::var("PATH").unwrap_or_default();
+        let extended_path = format!(
+            "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{}",
+            path_env
+        );
+
         let output = Command::new("gh")
             .args(&args)
             .current_dir(&cwd)
+            .env("PATH", &extended_path)
             .output()
             .map_err(|e| format!("Failed to execute gh: {}", e))?;
 
