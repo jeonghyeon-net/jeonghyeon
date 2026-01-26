@@ -3198,6 +3198,12 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd }: {
     // Flush pending Korean on non-IME keydown
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown') {
+        // Cmd+K to clear terminal (like macOS Terminal)
+        if (e.metaKey && e.key === 'k' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+          term.clear();
+          return false;
+        }
+
         // Handle Option+Arrow keys - send macOS-style sequences
         if (e.altKey && !e.ctrlKey && !e.metaKey) {
           if (e.key === 'ArrowLeft') {
