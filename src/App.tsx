@@ -4217,6 +4217,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   }, [issue?.worklogs.length, worklogCountBeforeSave]);
 
   // 워크로그가 삭제되면 deletingWorklogs에서 없어진 ID 제거
+  const worklogIds = issue?.worklogs.map(w => w.id).join(",") || "";
   useEffect(() => {
     if (issue && deletingWorklogs.size > 0) {
       const currentIds = new Set(issue.worklogs.map(w => w.id));
@@ -4225,7 +4226,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         setDeletingWorklogs(stillDeleting);
       }
     }
-  }, [issue?.worklogs, deletingWorklogs]);
+  }, [worklogIds, deletingWorklogs]);
 
   const copyToClipboard = async (text: string, type: "key" | "url") => {
     try {
@@ -4252,6 +4253,14 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
     setError(null);
     setEditing(null);
     setEditValue("");
+    // Reset worklog states
+    setShowLogWork(false);
+    setLogTimeSpent("");
+    setLogComment("");
+    setEditingWorklog(null);
+    setTimeSaving(false);
+    setDeletingWorklogs(new Set());
+    setWorklogCountBeforeSave(null);
     fetchIssueDetail(issueKey)
       .then((data) => {
         if (!cancelled) setIssue(data);
@@ -4604,8 +4613,8 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
             <svg className="time-donut" viewBox="0 0 20 20">
               <circle cx="10" cy="10" r="8" fill="none" stroke="var(--bg-tertiary)" strokeWidth="3" />
               <circle
-                cx="10" cy="10" r="8" fill="none" stroke="var(--accent)" strokeWidth="3"
-                strokeDasharray={`${issue.timeTracking?.originalEstimateSeconds ? Math.min(100, ((issue.timeTracking.timeSpentSeconds || 0) / issue.timeTracking.originalEstimateSeconds) * 50.265) : 0} 50.265`}
+                cx="10" cy="10" r="8" fill="none" stroke={timeExceeded ? "var(--error)" : "var(--accent)"} strokeWidth="3"
+                strokeDasharray={`${timeExceeded ? 50.265 : (estimateSeconds > 0 ? (loggedSeconds / estimateSeconds) * 50.265 : 0)} 50.265`}
                 strokeLinecap="round"
                 transform="rotate(-90 10 10)"
               />

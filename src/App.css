@@ -1435,12 +1435,12 @@ html, body, #root {
 }
 
 .time-text.time-exceeded {
-  color: var(--time-exceeded, #ef4444);
+  color: var(--error);
 }
 
 .time-excess {
   font-size: var(--font-size-xs);
-  color: var(--time-exceeded, #ef4444);
+  color: var(--error);
 }
 
 .time-log-btn {
