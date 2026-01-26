@@ -37,6 +37,26 @@ type Comment = {
   created: string;
 };
 
+type TimeTracking = {
+  originalEstimate: string | null;
+  remainingEstimate: string | null;
+  timeSpent: string | null;
+  originalEstimateSeconds: number | null;
+  remainingEstimateSeconds: number | null;
+  timeSpentSeconds: number | null;
+};
+
+type Worklog = {
+  id: string;
+  author: string;
+  authorId: string;
+  timeSpent: string;
+  timeSpentSeconds: number;
+  comment: string;
+  started: string;
+  created: string;
+};
+
 type IssueDetail = {
   id: string;
   key: string;
@@ -50,6 +70,7 @@ type IssueDetail = {
   assignee: string;
   assigneeId: string | null;
   reporter: string;
+  reporterId: string | null;
   created: string;
   updated: string;
   labels: string[];
@@ -58,6 +79,8 @@ type IssueDetail = {
   comments: Comment[];
   parentKey: string | null;
   parentSummary: string | null;
+  timeTracking: TimeTracking | null;
+  worklogs: Worklog[];
 };
 
 type ProjectFilter = {
@@ -826,7 +849,7 @@ async function fetchIssues(projectKey: string): Promise<Issue[]> {
 }
 
 async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
-  const url = `${getBaseUrl()}/rest/api/3/issue/${issueKey}?fields=summary,description,status,priority,assignee,reporter,created,updated,labels,issuetype,comment,project,parent`;
+  const url = `${getBaseUrl()}/rest/api/3/issue/${issueKey}?fields=summary,description,status,priority,assignee,reporter,created,updated,labels,issuetype,comment,project,parent,timetracking,worklog`;
   const res = await fetch(url, {
     headers: {
       Authorization: getAuthHeader(),
@@ -842,6 +865,28 @@ async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
     body: parseDescription(c.body),
     created: c.created || "",
   }));
+
+  const tt = data.fields.timetracking;
+  const timeTracking: TimeTracking | null = tt ? {
+    originalEstimate: tt.originalEstimate || null,
+    remainingEstimate: tt.remainingEstimate || null,
+    timeSpent: tt.timeSpent || null,
+    originalEstimateSeconds: tt.originalEstimateSeconds || null,
+    remainingEstimateSeconds: tt.remainingEstimateSeconds || null,
+    timeSpentSeconds: tt.timeSpentSeconds || null,
+  } : null;
+
+  const worklogs: Worklog[] = (data.fields.worklog?.worklogs || []).map((w: any) => ({
+    id: w.id,
+    author: w.author?.displayName || "Unknown",
+    authorId: w.author?.accountId || "",
+    timeSpent: w.timeSpent || "",
+    timeSpentSeconds: w.timeSpentSeconds || 0,
+    comment: parseDescription(w.comment),
+    started: w.started || "",
+    created: w.created || "",
+  }));
+
   return {
     id: data.id,
     key: data.key,
@@ -855,6 +900,7 @@ async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
     assignee: data.fields.assignee?.displayName || "Unassigned",
     assigneeId: data.fields.assignee?.accountId || null,
     reporter: data.fields.reporter?.displayName || "",
+    reporterId: data.fields.reporter?.accountId || null,
     created: data.fields.created || "",
     updated: data.fields.updated || "",
     labels: data.fields.labels || [],
@@ -863,6 +909,8 @@ async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
     comments,
     parentKey: data.fields.parent?.key || null,
     parentSummary: data.fields.parent?.fields?.summary || null,
+    timeTracking,
+    worklogs,
   };
 }
 
@@ -926,6 +974,95 @@ async function fetchPriorities(): Promise<{ id: string; name: string }[]> {
   if (!res.ok) return [];
   const data = await res.json();
   return data.map((p: any) => ({ id: p.id, name: p.name }));
+}
+
+// Worklog API functions
+function toJiraDatetime(date: Date): string {
+  // Jira expects: 2024-01-01T12:00:00.000+0900
+  const pad = (n: number, len = 2) => String(n).padStart(len, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  const absOffset = Math.abs(offset);
+  const offsetHours = pad(Math.floor(absOffset / 60));
+  const offsetMinutes = pad(absOffset % 60);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}${sign}${offsetHours}${offsetMinutes}`;
+}
+
+async function addWorklog(issueKey: string, timeSpent: string, comment?: string, started?: string): Promise<void> {
+  const body: any = {
+    timeSpent,
+    started: started || toJiraDatetime(new Date()),
+  };
+  if (comment) {
+    body.comment = {
+      type: "doc",
+      version: 1,
+      content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+    };
+  }
+  // adjustEstimate=leave: don't change remaining estimate
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/issue/${issueKey}/worklog?adjustEstimate=leave`, {
+    method: "POST",
+    headers: {
+      Authorization: getAuthHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.errorMessages?.[0] || "Failed to add worklog");
+  }
+}
+
+async function deleteWorklog(issueKey: string, worklogId: string): Promise<void> {
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/issue/${issueKey}/worklog/${worklogId}`, {
+    method: "DELETE",
+    headers: { Authorization: getAuthHeader() },
+  });
+  if (!res.ok) throw new Error("Failed to delete worklog");
+}
+
+async function updateWorklog(issueKey: string, worklogId: string, timeSpent: string, comment?: string): Promise<void> {
+  const body: any = { timeSpent };
+  if (comment !== undefined) {
+    body.comment = comment ? {
+      type: "doc",
+      version: 1,
+      content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+    } : null;
+  }
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/issue/${issueKey}/worklog/${worklogId}`, {
+    method: "PUT",
+    headers: {
+      Authorization: getAuthHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to update worklog");
+}
+
+async function updateTimeEstimate(issueKey: string, originalEstimate: string | null, remainingEstimate: string | null): Promise<void> {
+  const timetracking: any = {};
+  // null = don't update, empty string = clear, string = set value
+  if (originalEstimate !== null) timetracking.originalEstimate = originalEstimate || null;
+  if (remainingEstimate !== null) timetracking.remainingEstimate = remainingEstimate || null;
+
+  if (Object.keys(timetracking).length === 0) return; // nothing to update
+
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/issue/${issueKey}`, {
+    method: "PUT",
+    headers: {
+      Authorization: getAuthHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ fields: { timetracking } }),
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.errorMessages?.[0] || errData.errors?.timetracking || "Failed to update time estimate");
+  }
 }
 
 function textToAdf(text: string) {
@@ -4054,6 +4191,42 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
+  // Time tracking states
+  const [showLogWork, setShowLogWork] = useState(false);
+  const [logTimeSpent, setLogTimeSpent] = useState("");
+  const [logComment, setLogComment] = useState("");
+  const [editingWorklog, setEditingWorklog] = useState<string | null>(null);
+  const [editWorklogField, setEditWorklogField] = useState<"time" | "comment">("time");
+  const [editWorklogTime, setEditWorklogTime] = useState("");
+  const [editWorklogComment, setEditWorklogComment] = useState("");
+  const [estimateValue, setEstimateValue] = useState("");
+  const [remainingValue, setRemainingValue] = useState("");
+  const [timeSaving, setTimeSaving] = useState(false);
+  const [deletingWorklogs, setDeletingWorklogs] = useState<Set<string>>(new Set());
+  const [worklogCountBeforeSave, setWorklogCountBeforeSave] = useState<number | null>(null);
+
+  // 워크로그가 추가되면 입력창 닫기
+  useEffect(() => {
+    if (issue && worklogCountBeforeSave !== null && issue.worklogs.length > worklogCountBeforeSave) {
+      setLogTimeSpent("");
+      setLogComment("");
+      setShowLogWork(false);
+      setTimeSaving(false);
+      setWorklogCountBeforeSave(null);
+    }
+  }, [issue?.worklogs.length, worklogCountBeforeSave]);
+
+  // 워크로그가 삭제되면 deletingWorklogs에서 없어진 ID 제거
+  useEffect(() => {
+    if (issue && deletingWorklogs.size > 0) {
+      const currentIds = new Set(issue.worklogs.map(w => w.id));
+      const stillDeleting = new Set([...deletingWorklogs].filter(id => currentIds.has(id)));
+      if (stillDeleting.size !== deletingWorklogs.size) {
+        setDeletingWorklogs(stillDeleting);
+      }
+    }
+  }, [issue?.worklogs, deletingWorklogs]);
+
   const copyToClipboard = async (text: string, type: "key" | "url") => {
     try {
       await navigator.clipboard.writeText(text);
@@ -4106,7 +4279,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
     if (field === "status") {
       const t = await fetchTransitions(issueKey);
       setTransitions(t);
-    } else if (field === "assignee") {
+    } else if (field === "assignee" || field === "reporter") {
       const u = await fetchAssignableUsers(issue.projectKey);
       setUsers(u);
     } else if (field === "priority") {
@@ -4127,6 +4300,8 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         await transitionIssue(issueKey, value);
       } else if (field === "assignee") {
         await updateIssueField(issueKey, "assignee", value ? { accountId: value } : null);
+      } else if (field === "reporter") {
+        await updateIssueField(issueKey, "reporter", value ? { accountId: value } : null);
       } else if (field === "priority") {
         await updateIssueField(issueKey, "priority", { id: value });
       } else if (field === "summary") {
@@ -4200,6 +4375,23 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
       minute: "2-digit",
     });
   };
+
+  // Format minutes to time string like "1h 30m"
+  const formatMinutesToTime = (mins: number): string => {
+    if (mins <= 0) return "";
+    const hours = Math.floor(mins / 60);
+    const minutes = mins % 60;
+    if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h`;
+    return `${minutes}m`;
+  };
+
+  const estimateSeconds = issue.timeTracking?.originalEstimateSeconds || 0;
+  const remainingSeconds = issue.timeTracking?.remainingEstimateSeconds || 0;
+  const loggedSeconds = issue.timeTracking?.timeSpentSeconds || 0;
+  const totalSeconds = remainingSeconds + loggedSeconds;
+  const timeExceeded = estimateSeconds > 0 ? totalSeconds > estimateSeconds : totalSeconds > 0;
+  const excessMinutes = timeExceeded ? Math.floor((totalSeconds - estimateSeconds) / 60) : 0;
 
   return (
     <div className="issue-detail-container">
@@ -4369,7 +4561,31 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
 
         <div className="issue-meta-item">
           <span className="meta-label">Reporter</span>
-          <span className="meta-value">{issue.reporter}</span>
+          {editing === "reporter" ? (
+            users.length === 0 ? (
+              <span className="meta-value"><Spinner /></span>
+            ) : (
+              <div className="edit-dropdown">
+                <select
+                  className="edit-select"
+                  autoFocus
+                  value={issue.reporterId || ""}
+                  onChange={(e) => saveEdit("reporter", e.target.value || null)}
+                  disabled={saving}
+                >
+                  {users.map((u) => (
+                    <option key={u.accountId} value={u.accountId}>{u.displayName}</option>
+                  ))}
+                </select>
+                <button className="edit-cancel-small" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            )
+          ) : (
+            <span className="meta-value editable" onClick={() => startEdit("reporter")}>
+              {issue.reporter || "Unassigned"}
+              <span className="edit-icon"><EditIcon /></span>
+            </span>
+          )}
         </div>
 
         <div className="issue-meta-item">
@@ -4380,6 +4596,243 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         <div className="issue-meta-item">
           <span className="meta-label">Updated</span>
           <span className="meta-value">{formatDate(issue.updated)}</span>
+        </div>
+
+        <div className="issue-meta-item time-meta-item">
+          <span className="meta-label">Time</span>
+          <span className="meta-value time-tracking-value">
+            <svg className="time-donut" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="8" fill="none" stroke="var(--bg-tertiary)" strokeWidth="3" />
+              <circle
+                cx="10" cy="10" r="8" fill="none" stroke="var(--accent)" strokeWidth="3"
+                strokeDasharray={`${issue.timeTracking?.originalEstimateSeconds ? Math.min(100, ((issue.timeTracking.timeSpentSeconds || 0) / issue.timeTracking.originalEstimateSeconds) * 50.265) : 0} 50.265`}
+                strokeLinecap="round"
+                transform="rotate(-90 10 10)"
+              />
+            </svg>
+            <span className="time-item">
+              <span className="time-label-mini">Estimate</span>
+              {editing === "estimate" ? (
+                <>
+                  <input
+                    type="text"
+                    className="edit-input-small"
+                    value={estimateValue}
+                    onChange={(e) => setEstimateValue(e.target.value)}
+                    placeholder="2h"
+                    autoFocus
+                    onBlur={(e) => {
+                      if (e.relatedTarget?.classList.contains("edit-cancel-small")) return;
+                      if (estimateValue !== (issue.timeTracking?.originalEstimate || "")) {
+                        setTimeSaving(true);
+                        updateTimeEstimate(issueKey, estimateValue, null)
+                          .then(() => { reload(); setEditing(null); })
+                          .catch(() => setEditing(null))
+                          .finally(() => setTimeSaving(false));
+                      } else {
+                        setEditing(null);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                  />
+                  <button className="edit-cancel-small" onClick={() => setEditing(null)}>Cancel</button>
+                </>
+              ) : (
+                <span className="time-text editable" onClick={() => { setEditing("estimate"); setEstimateValue(issue.timeTracking?.originalEstimate || ""); }}>
+                  {issue.timeTracking?.originalEstimate || "—"}
+                </span>
+              )}
+            </span>
+            <span className="time-item">
+              <span className="time-label-mini">Remaining</span>
+              {editing === "remaining" ? (
+                <>
+                  <input
+                    type="text"
+                    className="edit-input-small"
+                    value={remainingValue}
+                    onChange={(e) => setRemainingValue(e.target.value)}
+                    placeholder="1h 30m"
+                    autoFocus
+                    onBlur={(e) => {
+                      if (e.relatedTarget?.classList.contains("edit-cancel-small")) return;
+                      if (remainingValue !== (issue.timeTracking?.remainingEstimate || "")) {
+                        setTimeSaving(true);
+                        updateTimeEstimate(issueKey, null, remainingValue)
+                          .then(() => { reload(); setEditing(null); })
+                          .catch(() => setEditing(null))
+                          .finally(() => setTimeSaving(false));
+                      } else {
+                        setEditing(null);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                      if (e.key === "Escape") setEditing(null);
+                    }}
+                  />
+                  <button className="edit-cancel-small" onClick={() => setEditing(null)}>Cancel</button>
+                </>
+              ) : (
+                <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { setEditing("remaining"); setRemainingValue(issue.timeTracking?.remainingEstimate || ""); }}>
+                  {issue.timeTracking?.remainingEstimate || "—"}
+                </span>
+              )}
+            </span>
+            <span className="time-item">
+              <span className="time-label-mini">Logged</span>
+              <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { if (!showLogWork) { setLogTimeSpent(""); setLogComment(""); } setShowLogWork(!showLogWork); }}>
+                {issue.timeTracking?.timeSpent || "—"}
+                {timeExceeded && <span className="time-excess"> (+{formatMinutesToTime(excessMinutes)})</span>}
+              </span>
+            </span>
+          </span>
+          {/* Worklogs Table */}
+          {(showLogWork || issue.worklogs.length > 0) && (
+            <table className="worklogs-table">
+              <tbody>
+                {issue.worklogs.map((log) => (
+                  <tr key={log.id} className={`worklog-row ${editingWorklog === log.id ? "worklog-input-row" : ""} ${deletingWorklogs.has(log.id) ? "worklog-deleting" : ""}`}>
+                    <td className="worklog-date">{formatDate(log.started)}</td>
+                    <td className="worklog-time">
+                      {editingWorklog === log.id ? (
+                        <input
+                          type="text"
+                          className="log-work-input"
+                          value={editWorklogTime}
+                          onChange={(e) => setEditWorklogTime(e.target.value)}
+                          onBlur={(e) => {
+                            const row = e.currentTarget.closest("tr");
+                            if (row?.contains(e.relatedTarget as Node)) return;
+                            const timeChanged = editWorklogTime.trim() && editWorklogTime !== log.timeSpent;
+                            const commentChanged = editWorklogComment !== (log.comment || "");
+                            if (timeChanged || commentChanged) {
+                              updateWorklog(issueKey, log.id, editWorklogTime || log.timeSpent, editWorklogComment)
+                                .then(() => { setEditingWorklog(null); reload(); onRefresh(); })
+                                .catch((err: any) => { console.error(err); setEditingWorklog(null); });
+                            } else {
+                              setEditingWorklog(null);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setEditingWorklog(null);
+                          }}
+                          autoFocus={editWorklogField === "time"}
+                        />
+                      ) : (
+                        <span className="editable" onClick={() => { setEditingWorklog(log.id); setEditWorklogField("time"); setEditWorklogTime(log.timeSpent); setEditWorklogComment(log.comment || ""); }}>{log.timeSpent}</span>
+                      )}
+                    </td>
+                    <td className="worklog-comment">
+                      {editingWorklog === log.id ? (
+                        <>
+                          <input
+                            type="text"
+                            className="log-work-input comment"
+                            value={editWorklogComment}
+                            onChange={(e) => setEditWorklogComment(e.target.value)}
+                            onBlur={(e) => {
+                              const row = e.currentTarget.closest("tr");
+                              if (row?.contains(e.relatedTarget as Node)) return;
+                              const timeChanged = editWorklogTime.trim() && editWorklogTime !== log.timeSpent;
+                              const commentChanged = editWorklogComment !== (log.comment || "");
+                              if (timeChanged || commentChanged) {
+                                updateWorklog(issueKey, log.id, editWorklogTime || log.timeSpent, editWorklogComment)
+                                  .then(() => { setEditingWorklog(null); reload(); onRefresh(); })
+                                  .catch((err: any) => { console.error(err); setEditingWorklog(null); });
+                              } else {
+                                setEditingWorklog(null);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              if (e.key === "Escape") setEditingWorklog(null);
+                            }}
+                            placeholder="Comment"
+                            autoFocus={editWorklogField === "comment"}
+                          />
+                          <button className="worklog-delete" onClick={() => setEditingWorklog(null)}>×</button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="editable" onClick={() => { setEditingWorklog(log.id); setEditWorklogField("comment"); setEditWorklogTime(log.timeSpent); setEditWorklogComment(log.comment || ""); }}>{log.comment || ""}</span>
+                          <button className="worklog-delete" disabled={deletingWorklogs.has(log.id)} onClick={async () => { setDeletingWorklogs(prev => new Set([...prev, log.id])); try { await deleteWorklog(issueKey, log.id); reload(); onRefresh(); } catch { setDeletingWorklogs(prev => { const next = new Set(prev); next.delete(log.id); return next; }); } }}>×</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {showLogWork && !(worklogCountBeforeSave !== null && issue.worklogs.length > worklogCountBeforeSave) && (
+                  <tr className={`worklog-row ${timeSaving ? "worklog-saving" : "worklog-input-row"}`}>
+                    <td className="worklog-date">{formatDate(new Date().toISOString())}</td>
+                    <td className="worklog-time">
+                      {timeSaving ? (
+                        <span>{logTimeSpent}</span>
+                      ) : (
+                        <input
+                          type="text"
+                          className="log-work-input"
+                          value={logTimeSpent}
+                          onChange={(e) => setLogTimeSpent(e.target.value)}
+                          onBlur={(e) => {
+                            const row = e.currentTarget.closest("tr");
+                            if (row?.contains(e.relatedTarget as Node)) return;
+                            setShowLogWork(false); setLogTimeSpent(""); setLogComment("");
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") { setShowLogWork(false); setLogTimeSpent(""); setLogComment(""); }
+                          }}
+                          placeholder="1h 30m"
+                          autoFocus
+                        />
+                      )}
+                    </td>
+                    <td className="worklog-comment">
+                      {timeSaving ? (
+                        <span>{logComment}</span>
+                      ) : (
+                        <>
+                          <input
+                            type="text"
+                            className="log-work-input comment"
+                            value={logComment}
+                            onChange={(e) => setLogComment(e.target.value)}
+                            onBlur={(e) => {
+                              const row = e.currentTarget.closest("tr");
+                              if (row?.contains(e.relatedTarget as Node)) return;
+                              if (logTimeSpent.trim() && logComment.trim() && !timeSaving) {
+                                setTimeSaving(true);
+                                setWorklogCountBeforeSave(issue.worklogs.length);
+                                addWorklog(issueKey, logTimeSpent, logComment)
+                                  .then(() => {
+                                    reload();
+                                    onRefresh();
+                                  })
+                                  .catch((err: any) => {
+                                    console.error(err);
+                                    setTimeSaving(false);
+                                    setWorklogCountBeforeSave(null);
+                                  });
+                              } else {
+                                setShowLogWork(false); setLogTimeSpent(""); setLogComment("");
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Escape") { setShowLogWork(false); setLogTimeSpent(""); setLogComment(""); }
+                            }}
+                            placeholder="Comment"
+                          /><button className="worklog-delete" onClick={() => { setShowLogWork(false); setLogTimeSpent(""); setLogComment(""); }}>×</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 

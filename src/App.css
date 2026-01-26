@@ -1163,8 +1163,8 @@ html, body, #root {
 .issue-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px 24px;
-  padding: 16px 0;
+  gap: 12px 24px;
+  padding: 12px 0;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   margin-bottom: 12px;
@@ -1379,6 +1379,213 @@ html, body, #root {
 .description-content tr:hover,
 .comment-body tr:hover {
   background: var(--bg-table-hover);
+}
+
+/* Time Tracking */
+.time-meta-item {
+  min-width: 500px;
+  flex-basis: 100%;
+  padding-bottom: 4px;
+}
+
+.time-tracking-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.time-donut {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.time-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.time-label-mini {
+  font-size: var(--issue-meta-label-font-size);
+  color: var(--text-muted);
+}
+
+.time-text {
+  font-size: var(--font-size-xs);
+  color: var(--text);
+  margin-left: 4px;
+}
+
+.time-text.editable {
+  cursor: pointer;
+  position: relative;
+}
+
+.time-text.editable::after {
+  content: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/%3E%3C/svg%3E");
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.time-text.editable:hover::after {
+  opacity: 0.6;
+}
+
+.time-text.time-exceeded {
+  color: var(--time-exceeded, #ef4444);
+}
+
+.time-excess {
+  font-size: var(--font-size-xs);
+  color: var(--time-exceeded, #ef4444);
+}
+
+.time-log-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 8px 3px;
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  line-height: 1;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.time-log-btn:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+}
+
+.edit-input-small {
+  padding: 6px 10px;
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  outline: none;
+  width: 80px;
+  transition: border-color 0.15s;
+  cursor: text;
+}
+
+.edit-input-small:focus {
+  border-color: var(--border-focus);
+}
+
+.edit-input-small::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+/* Worklogs Table */
+.worklogs-table {
+  width: 100%;
+  margin-top: 4px;
+  margin-bottom: 0;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+  border: 1px solid var(--border);
+}
+
+.worklog-row td {
+  padding: 4px 6px;
+  vertical-align: middle;
+  border: 1px solid var(--border);
+}
+
+.worklog-time {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  width: 1%;
+  min-width: 6em;
+  text-align: center;
+}
+
+.worklog-date {
+  color: var(--text-muted);
+  white-space: nowrap;
+  width: 1%;
+}
+
+.worklog-comment {
+  color: var(--text-muted);
+}
+
+.worklog-delete {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  padding: 0 0 0 6px;
+  cursor: pointer;
+  transition: color 0.15s;
+  float: right;
+}
+
+.worklog-delete:hover {
+  color: var(--error);
+}
+
+.worklog-deleting {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.worklog-saving {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Worklog Input Row */
+.worklog-input-row td {
+  padding: 4px 6px;
+}
+
+.worklog-input-row .log-work-input {
+  padding: 0;
+  margin: 0;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+  background: transparent;
+  border: none;
+  color: inherit;
+  outline: none;
+  line-height: 1;
+  cursor: text;
+}
+
+.worklog-input-row .worklog-time .log-work-input {
+  width: 100%;
+  min-width: 3em;
+  text-align: center;
+}
+
+.worklog-input-row .worklog-comment {
+  display: flex;
+  align-items: center;
+  border: none;
+}
+
+.worklog-input-row .log-work-input.comment {
+  flex: 1;
+  width: auto;
+}
+
+.worklog-input-row .log-work-input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.5;
 }
 
 /* Comments */
