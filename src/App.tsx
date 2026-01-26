@@ -751,6 +751,13 @@ const PlusIcon = () => (
   </svg>
 );
 
+const ExternalTerminalIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="4 17 10 11 4 5" />
+    <line x1="12" y1="19" x2="20" y2="19" />
+  </svg>
+);
+
 const PinIcon = () => (
   <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="12" y1="17" x2="12" y2="22" />
@@ -1474,6 +1481,11 @@ function ProjectTree({
               )}
             </div>
             <div className="tree-item-actions">
+              {getProjectRepoPath(project.key) && (
+                <button className="icon-btn" onClick={(e) => { e.stopPropagation(); invoke("open_terminal_at", { path: getProjectRepoPath(project.key) }); }} title="Open in Terminal">
+                  <ExternalTerminalIcon />
+                </button>
+              )}
               <button className="icon-btn" onClick={(e) => { e.stopPropagation(); onCreateClick(project.key); }} title="Create Issue">
                 <PlusIcon />
               </button>
@@ -3451,18 +3463,14 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
     }
   };
 
-  // Load branches when repoPath is set or issue changes
+  // Load branches function
   const branchLoadRequestIdRef = useRef(0);
-  useEffect(() => {
-    if (!repoPath || worktreeInfo) return;
-
-    // Use request ID to track if this effect is still current
+  const loadBranches = (targetRepoPath: string) => {
     const currentRequestId = ++branchLoadRequestIdRef.current;
 
-    // Load local branches only (no remote fetch)
     Promise.all([
-      invoke("run_git_command", { cwd: repoPath, args: ["branch"] }),
-      invoke("run_git_command", { cwd: repoPath, args: ["rev-parse", "--abbrev-ref", "HEAD"] }),
+      invoke("run_git_command", { cwd: targetRepoPath, args: ["branch"] }),
+      invoke("run_git_command", { cwd: targetRepoPath, args: ["rev-parse", "--abbrev-ref", "HEAD"] }),
     ]).then(([branchOutput, currentOutput]) => {
       if (branchLoadRequestIdRef.current !== currentRequestId) return;
       const branchList = (branchOutput as string)
@@ -3478,6 +3486,12 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
       console.error("Failed to load branches:", e);
       setWorktreeError("Failed to load branches. Is this a git repository?");
     });
+  };
+
+  // Load branches when repoPath is set or issue changes
+  useEffect(() => {
+    if (!repoPath || worktreeInfo) return;
+    loadBranches(repoPath);
   }, [repoPath, worktreeInfo, issueKey]);
 
   // Create worktree
@@ -3704,6 +3718,10 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
           setBranchMode("new");
           setSelectedExistingBranch("");
           setBranchName(capturedIssueKey);
+          // Reload branches after worktree deletion
+          if (capturedRepoPath) {
+            loadBranches(capturedRepoPath);
+          }
         }
       }
     }
@@ -4216,7 +4234,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
                           value={selectedExistingBranch}
                           onChange={(e) => setSelectedExistingBranch(e.target.value)}
                         >
-                          <option value="">Select branch...</option>
+                          <option value="" disabled>Select branch...</option>
                           {branches.filter(b => !b.startsWith("remotes/")).length > 0 && (
                             <optgroup label="Local">
                               {branches.filter(b => !b.startsWith("remotes/")).map(b => (

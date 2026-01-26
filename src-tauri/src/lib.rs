@@ -317,6 +317,19 @@ async fn run_gh_command(cwd: String, args: Vec<String>) -> Result<String, String
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+#[tauri::command]
+async fn open_terminal_at(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Command::new("open")
+            .args(["-a", "Terminal", &path])
+            .output()
+            .map_err(|e| format!("Failed to open terminal: {}", e))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -339,7 +352,8 @@ pub fn run() {
             get_app_data_dir,
             list_files_in_dir,
             delete_file,
-            delete_directory
+            delete_directory,
+            open_terminal_at
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
