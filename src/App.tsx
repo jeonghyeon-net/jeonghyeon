@@ -3404,7 +3404,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   const [currentBranch, setCurrentBranch] = useState<string>("");
   const [branchName, setBranchName] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
-  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [isCreatingWorktree, setIsCreatingWorktree] = useState(false);
   const [worktreeError, setWorktreeError] = useState<string | null>(null);
   const [branchMode, setBranchMode] = useState<"new" | "existing">("new");
@@ -3456,10 +3455,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
   const branchLoadRequestIdRef = useRef(0);
   useEffect(() => {
     if (!repoPath || worktreeInfo) return;
-    setIsLoadingBranches(true);
-    setBranches([]);
-    setCurrentBranch("");
-    setBaseBranch("");
 
     // Use request ID to track if this effect is still current
     const currentRequestId = ++branchLoadRequestIdRef.current;
@@ -3482,9 +3477,6 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
       if (branchLoadRequestIdRef.current !== currentRequestId) return;
       console.error("Failed to load branches:", e);
       setWorktreeError("Failed to load branches. Is this a git repository?");
-    }).finally(() => {
-      if (branchLoadRequestIdRef.current !== currentRequestId) return;
-      setIsLoadingBranches(false);
     });
   }, [repoPath, worktreeInfo, issueKey]);
 
@@ -4166,7 +4158,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
                 <div className="terminal-worktree-spinner" />
                 <div className="terminal-worktree-loading-text">Setting up worktree...</div>
               </div>
-            ) : isLoadingBranches ? (
+            ) : branches.length === 0 ? (
               <div className="terminal-worktree-loading">
                 <div className="terminal-worktree-spinner" />
                 <div className="terminal-worktree-loading-text">Loading branches...</div>

@@ -13,7 +13,7 @@ struct PtySession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
-    reader_thread: thread::JoinHandle<()>,
+    _reader_thread: thread::JoinHandle<()>,
 }
 
 pub struct PtyState {
@@ -94,7 +94,7 @@ async fn create_pty_session(
         master: pair.master,
         writer,
         child,
-        reader_thread,
+        _reader_thread: reader_thread,
     };
 
     let mut sessions = state.sessions.lock().await;
