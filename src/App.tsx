@@ -854,7 +854,6 @@ async function fetchIssues(projectKey: string): Promise<Issue[]> {
   }
 
   const jql = conditions.join(" AND ") + ` ORDER BY ${filter.sortBy} ${filter.sortOrder}`;
-  console.log("JQL:", jql);
   const url = `${getBaseUrl()}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=summary,priority,issuetype,status&maxResults=${filter.maxResults}`;
   const res = await fetch(url, {
     headers: {
@@ -1210,8 +1209,6 @@ async function createIssue(params: CreateIssueParams): Promise<string> {
 function parseDescription(desc: any): string {
   if (!desc) return "";
   if (typeof desc === "string") return desc;
-
-  console.log("ADF:", JSON.stringify(desc, null, 2));
 
   // Atlassian Document Format (ADF) -> Markdown
   const convertNode = (node: any, listDepth = 0): string => {
@@ -3533,9 +3530,8 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
             cwd: repoPath,
             args: ["worktree", "add", "-b", targetBranch, worktreePath, baseBranch],
           });
-        } catch (e: any) {
+        } catch {
           // Branch might already exist, try without -b flag
-          console.warn("Failed with -b flag, trying existing branch:", e);
           await invoke("run_git_command", {
             cwd: repoPath,
             args: ["worktree", "add", worktreePath, targetBranch],
@@ -3679,9 +3675,7 @@ function TerminalPanel({ issueKey, projectKey }: { issueKey: string; projectKey:
 
       // 7. Git cleanup - must be sequential: prune first, then delete branch
       await invoke("run_git_command", { cwd: capturedRepoPath, args: ["worktree", "prune"] }).catch(() => {});
-      await invoke("run_git_command", { cwd: capturedRepoPath, args: ["branch", "-D", capturedWorktreeInfo.branch] }).catch(e => {
-        console.warn("Failed to delete branch:", e);
-      });
+      await invoke("run_git_command", { cwd: capturedRepoPath, args: ["branch", "-D", capturedWorktreeInfo.branch] }).catch(() => {});
     } finally {
       // Always clear isDeleting flag
       setIssueTerminalState(capturedIssueKey, {
