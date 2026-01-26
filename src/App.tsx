@@ -4650,7 +4650,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                   <button className="edit-cancel-small" onClick={() => setEditing(null)}>Cancel</button>
                 </>
               ) : (
-                <span className="time-text editable" onClick={() => { setEditing("estimate"); setEstimateValue(issue.timeTracking?.originalEstimate || ""); }}>
+                <span className="time-text editable" onClick={() => { if (timeSaving) return; setEditing("estimate"); setEstimateValue(issue.timeTracking?.originalEstimate || ""); }}>
                   {issue.timeTracking?.originalEstimate || "—"}
                 </span>
               )}
@@ -4686,14 +4686,14 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                   <button className="edit-cancel-small" onClick={() => setEditing(null)}>Cancel</button>
                 </>
               ) : (
-                <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { setEditing("remaining"); setRemainingValue(issue.timeTracking?.remainingEstimate || ""); }}>
+                <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { if (timeSaving) return; setEditing("remaining"); setRemainingValue(issue.timeTracking?.remainingEstimate || ""); }}>
                   {issue.timeTracking?.remainingEstimate || "—"}
                 </span>
               )}
             </span>
             <span className="time-item">
               <span className="time-label-mini">Logged</span>
-              <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { if (!showLogWork) { setLogTimeSpent(""); setLogComment(""); } setShowLogWork(!showLogWork); }}>
+              <span className={`time-text editable ${timeExceeded ? "time-exceeded" : ""}`} onClick={() => { if (timeSaving) return; if (!showLogWork) { setLogTimeSpent(""); setLogComment(""); } setShowLogWork(!showLogWork); }}>
                 {issue.timeTracking?.timeSpent || "—"}
                 {timeExceeded && <span className="time-excess"> (+{formatMinutesToTime(excessMinutes)})</span>}
               </span>
@@ -4732,7 +4732,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                           autoFocus={editWorklogField === "time"}
                         />
                       ) : (
-                        <span className="editable" onClick={() => { setEditingWorklog(log.id); setEditWorklogField("time"); setEditWorklogTime(log.timeSpent); setEditWorklogComment(log.comment || ""); }}>{log.timeSpent}</span>
+                        <span className={deletingWorklogs.has(log.id) ? "" : "editable"} onClick={() => { if (deletingWorklogs.has(log.id)) return; setEditingWorklog(log.id); setEditWorklogField("time"); setEditWorklogTime(log.timeSpent); setEditWorklogComment(log.comment || ""); }}>{log.timeSpent}</span>
                       )}
                     </td>
                     <td className="worklog-comment">
@@ -4767,7 +4767,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
                         </>
                       ) : (
                         <>
-                          <span className="editable" onClick={() => { setEditingWorklog(log.id); setEditWorklogField("comment"); setEditWorklogTime(log.timeSpent); setEditWorklogComment(log.comment || ""); }}>{log.comment || ""}</span>
+                          <span className={deletingWorklogs.has(log.id) ? "" : "editable"} onClick={() => { if (deletingWorklogs.has(log.id)) return; setEditingWorklog(log.id); setEditWorklogField("comment"); setEditWorklogTime(log.timeSpent); setEditWorklogComment(log.comment || ""); }}>{log.comment || ""}</span>
                           <button className="worklog-delete" disabled={deletingWorklogs.has(log.id)} onClick={async () => { setDeletingWorklogs(prev => new Set([...prev, log.id])); try { await deleteWorklog(issueKey, log.id); reload(); onRefresh(); } catch { setDeletingWorklogs(prev => { const next = new Set(prev); next.delete(log.id); return next; }); } }}>×</button>
                         </>
                       )}
