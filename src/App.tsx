@@ -3572,7 +3572,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           isCreating: false,
           isAutoCreatingTerminal: false,
         });
-        setIsCollapsed(false);
 
         // Write setup.sh
         invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
@@ -3608,7 +3607,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           isCreating: false,
           isAutoCreatingTerminal: false,
         });
-        setIsCollapsed(false);
 
         // Write setup.sh
         invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
@@ -3861,7 +3859,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           setGroupsState([newGroup]);
           setActiveGroupIdState(groupId);
           setNextGroupIdState(groupId + 1);
-          setIsCollapsed(false);
         }
 
         // setup.sh is now run in createWorktree, not here
@@ -3903,7 +3900,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
       if (issueKeyRef.current === capturedIssueKey) {
         setGroupsState(prev => [...prev, newGroup]);
         setActiveGroupIdState(groupId);
-        setIsCollapsed(false);
       }
     } catch (e) {
       console.error("Failed to create PTY:", e);
