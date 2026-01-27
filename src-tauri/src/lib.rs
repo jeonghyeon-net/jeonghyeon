@@ -57,6 +57,10 @@ async fn create_pty_session(
     }
     // Set TERM for proper escape sequence handling
     cmd.env("TERM", "xterm-256color");
+    // Set UTF-8 locale for proper Korean/CJK character handling
+    // DMG-installed apps don't inherit shell environment variables
+    cmd.env("LANG", "en_US.UTF-8");
+    cmd.env("LC_ALL", "en_US.UTF-8");
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| format!("Failed to spawn command: {}", e))?;
 
