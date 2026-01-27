@@ -1164,6 +1164,27 @@ html, body, #root {
   border-radius: 3px;
 }
 
+.issue-type-badge.editable {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.issue-type-badge.editable:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.issue-type-badge.editable .edit-icon {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.issue-type-badge.editable:hover .edit-icon {
+  opacity: 0.6;
+}
+
 .issue-parent {
   display: flex;
   align-items: center;

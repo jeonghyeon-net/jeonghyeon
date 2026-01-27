@@ -1781,6 +1781,18 @@ async function fetchProjectIssueTypes(projectKey: string): Promise<string[]> {
   const data = await res.json();
   return data.issueTypes?.map((t: any) => t.name) || [];
 }
+
+async function fetchProjectIssueTypesWithId(projectKey: string): Promise<{ id: string; name: string }[]> {
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/project/${projectKey}`, {
+    headers: {
+      Authorization: getAuthHeader(),
+      Accept: "application/json",
+    },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.issueTypes?.map((t: any) => ({ id: t.id, name: t.name })) || [];
+}
 const SORT_OPTIONS = [
   { value: "created", label: "Created" },
   { value: "updated", label: "Updated" },
@@ -4706,6 +4718,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   const [transitions, setTransitions] = useState<{ id: string; name: string }[]>([]);
   const [users, setUsers] = useState<{ accountId: string; displayName: string }[]>([]);
   const [priorities, setPriorities] = useState<{ id: string; name: string }[]>([]);
+  const [projectIssueTypes, setProjectIssueTypes] = useState<{ id: string; name: string }[]>([]);
   const [editValue, setEditValue] = useState("");
   const [newComment, setNewComment] = useState("");
   const [addingComment, setAddingComment] = useState(false);
@@ -4848,6 +4861,9 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
       setProjectComponents(comps);
       setSelectedComponents(latestIssue.components);
       setComponentsLoading(false);
+    } else if (field === "issueType") {
+      const types = await fetchProjectIssueTypesWithId(issue.projectKey);
+      setProjectIssueTypes(types);
     }
   };
 
@@ -4886,6 +4902,8 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         await updateIssueField(issueKey, "components", components);
       } else if (field === "duedate") {
         await updateIssueField(issueKey, "duedate", value);
+      } else if (field === "issueType") {
+        await updateIssueField(issueKey, "issuetype", { id: value });
       }
       reload();
       onRefresh();
@@ -4987,7 +5005,24 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           >
             {issue.key}
           </div>
-          <div className="issue-type-badge">{issue.issueType}</div>
+          {editing === "issueType" ? (
+            <select
+              className="edit-select"
+              value={projectIssueTypes.find(t => t.name === issue.issueType)?.id || ""}
+              onChange={(e) => saveEdit("issueType", e.target.value)}
+              onBlur={() => setEditing(null)}
+              autoFocus
+            >
+              {projectIssueTypes.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          ) : (
+            <div className="issue-type-badge editable" onClick={() => startEdit("issueType")}>
+              {issue.issueType}
+              <span className="edit-icon"><EditIcon /></span>
+            </div>
+          )}
           <button
             className="create-child-btn"
             onClick={() => onCreateChild(issue.projectKey, issue.key)}
