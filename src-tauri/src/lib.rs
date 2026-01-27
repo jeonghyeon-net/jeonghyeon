@@ -78,16 +78,45 @@ async fn create_pty_session(
     let app_clone = app.clone();
     let reader_thread = thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        let mut pending: Vec<u8> = Vec::new(); // Buffer for incomplete UTF-8 sequences
 
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => {
+                    // Flush any remaining pending bytes (as lossy)
+                    if !pending.is_empty() {
+                        let text = String::from_utf8_lossy(&pending).into_owned();
+                        let _ = app_clone.emit(&format!("pty-output-{}", session_id), text);
+                    }
                     let _ = app_clone.emit(&format!("pty-end-{}", session_id), ());
                     break;
                 }
                 Ok(n) => {
-                    let text = String::from_utf8_lossy(&buf[..n]).into_owned();
-                    let _ = app_clone.emit(&format!("pty-output-{}", session_id), text);
+                    pending.extend_from_slice(&buf[..n]);
+
+                    // Find valid UTF-8 boundary
+                    let valid_up_to = match std::str::from_utf8(&pending) {
+                        Ok(_) => pending.len(),
+                        Err(e) => e.valid_up_to(),
+                    };
+
+                    if valid_up_to > 0 {
+                        // Safe: we just validated this range is valid UTF-8
+                        let text = unsafe {
+                            std::str::from_utf8_unchecked(&pending[..valid_up_to])
+                        }.to_owned();
+                        let _ = app_clone.emit(&format!("pty-output-{}", session_id), text);
+                        pending.drain(..valid_up_to);
+                    }
+
+                    // Keep incomplete sequence in pending (max 4 bytes for UTF-8)
+                    // If pending grows too large without valid UTF-8, it's corrupted data
+                    if pending.len() > 16 {
+                        // Force flush as lossy to prevent memory buildup
+                        let text = String::from_utf8_lossy(&pending).into_owned();
+                        let _ = app_clone.emit(&format!("pty-output-{}", session_id), text);
+                        pending.clear();
+                    }
                 }
                 Err(_) => {
                     let _ = app_clone.emit(&format!("pty-end-{}", session_id), ());
