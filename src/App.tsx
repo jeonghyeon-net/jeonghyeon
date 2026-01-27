@@ -3202,9 +3202,7 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
     // so we handle Korean input via beforeinput events instead.
     const xtermTextarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement;
     let pendingKorean = '';
-    let sentFromBeforeinput = new Set<string>();
-    let expectingFirstKorean = false; // True after non-IME key, expecting first Korean input
-    let beforeinputWorking = false; // Track if beforeinput is firing properly
+    let composing = false; // True after insertReplacementText (actual composition started)
 
     const isKoreanChar = (str: string) => {
       if (!str || str.length === 0) return false;
@@ -3214,18 +3212,15 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
              (code >= 0xAC00 && code <= 0xD7AF);     // Hangul Syllables
     };
 
-
     const flushPendingKorean = () => {
       if (pendingKorean) {
         invoke("write_to_pty", { sessionId, data: pendingKorean }).catch(console.error);
-        sentFromBeforeinput.add(pendingKorean);
         pendingKorean = '';
-        // Clear the set after a short delay to allow for onData check
-        setTimeout(() => sentFromBeforeinput.clear(), 50);
       }
+      composing = false;
     };
 
-    // Flush pending Korean on non-IME keydown
+    // Handle special keys only
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown') {
         // Cmd+K to clear terminal (like macOS Terminal)
@@ -3237,29 +3232,15 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
         // Handle Option+Arrow keys - send macOS-style sequences
         if (e.altKey && !e.ctrlKey && !e.metaKey) {
           if (e.key === 'ArrowLeft') {
-            invoke("write_to_pty", { sessionId, data: '\x1bb' }).catch(console.error); // ESC b = backward-word
+            invoke("write_to_pty", { sessionId, data: '\x1bb' }).catch(console.error);
             return false;
           } else if (e.key === 'ArrowRight') {
-            invoke("write_to_pty", { sessionId, data: '\x1bf' }).catch(console.error); // ESC f = forward-word
+            invoke("write_to_pty", { sessionId, data: '\x1bf' }).catch(console.error);
             return false;
           } else if (e.key === 'Backspace') {
-            invoke("write_to_pty", { sessionId, data: '\x1b\x7f' }).catch(console.error); // ESC DEL = backward-kill-word
+            invoke("write_to_pty", { sessionId, data: '\x1b\x7f' }).catch(console.error);
             return false;
           }
-        }
-
-        // Skip modifier keys (Shift, Ctrl, Alt, Meta)
-        const isModifier = (e.keyCode >= 16 && e.keyCode <= 18) || e.keyCode === 91 || e.keyCode === 93;
-
-        if (e.keyCode === 229) {
-          // IME key - if beforeinput fires, it's working
-          // Will be confirmed in beforeinput handler
-        } else if (!isModifier) {
-          flushPendingKorean();
-          // After a non-IME key (like space), expect first Korean input
-          // where beforeinput might not fire properly
-          expectingFirstKorean = true;
-          beforeinputWorking = false;
         }
       }
       return true;
@@ -3272,20 +3253,25 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
 
         if (inputType === 'insertReplacementText') {
           // Composition update (e.g., ㅇ -> 아 -> 안)
+          composing = true;
           pendingKorean = data;
-          beforeinputWorking = true;
-          expectingFirstKorean = false;
         } else if (inputType === 'insertText' && isKoreanChar(data)) {
-          beforeinputWorking = true;
-          expectingFirstKorean = false;
-          if (data === pendingKorean) {
-            // Commit event - flush the completed character
-            flushPendingKorean();
-          } else {
-            // New Korean character - flush previous and start new
-            flushPendingKorean();
-            pendingKorean = data;
+          if (composing) {
+            if (data === pendingKorean) {
+              // Same as pending = composition commit
+              invoke("write_to_pty", { sessionId, data }).catch(console.error);
+              pendingKorean = '';
+              composing = false;
+            } else {
+              // Different Korean = new composition starting, flush pending first
+              if (pendingKorean) {
+                invoke("write_to_pty", { sessionId, data: pendingKorean }).catch(console.error);
+                pendingKorean = '';
+              }
+              composing = false;
+            }
           }
+          // If not composing, ignore (initial insertText before insertReplacementText)
         }
       }, true);
 
@@ -3295,44 +3281,13 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
     }
 
     // Input handling
-    let fallbackTimeout: number | null = null;
-
     term.onData((data) => {
       if (isKoreanChar(data)) {
-        // Skip if we already sent this via beforeinput or have it pending
-        if (sentFromBeforeinput.has(data) || pendingKorean === data || pendingKorean) {
-          expectingFirstKorean = false;
-          if (fallbackTimeout) {
-            clearTimeout(fallbackTimeout);
-            fallbackTimeout = null;
-          }
-          return;
-        }
-        // Fallback: only for first Korean input after IME switch
-        // when beforeinput didn't fire - use delay to give beforeinput a chance
-        if (expectingFirstKorean && !beforeinputWorking) {
-          const koreanData = data;
-          fallbackTimeout = window.setTimeout(() => {
-            // Check again if beforeinput handled it
-            if (!pendingKorean && !sentFromBeforeinput.has(koreanData) && !beforeinputWorking) {
-              invoke("write_to_pty", { sessionId, data: koreanData }).catch(console.error);
-              sentFromBeforeinput.add(koreanData);
-              setTimeout(() => sentFromBeforeinput.delete(koreanData), 100);
-            }
-            fallbackTimeout = null;
-          }, 10);
-        }
-        expectingFirstKorean = false;
+        // Korean is handled by beforeinput, ignore here
         return;
       }
 
-      // Clear any pending fallback
-      if (fallbackTimeout) {
-        clearTimeout(fallbackTimeout);
-        fallbackTimeout = null;
-      }
-
-      // Flush pending Korean first, then send this data
+      // Non-Korean input: flush any pending Korean first, then send
       flushPendingKorean();
       invoke("write_to_pty", { sessionId, data }).catch(console.error);
     });
