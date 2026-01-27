@@ -1437,6 +1437,7 @@ function ProjectTree({
   onCreateClick,
   pinnedIssues,
   onPinToggle,
+  onIssuesChange,
 }: {
   onSettingsClick: (projectKey: string) => void;
   onRefresh: number;
@@ -1447,6 +1448,7 @@ function ProjectTree({
   onCreateClick: (projectKey: string) => void;
   pinnedIssues: string[];
   onPinToggle: (issueKey: string) => void;
+  onIssuesChange: (issueKeys: Set<string>) => void;
 }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1503,6 +1505,15 @@ function ProjectTree({
 
 
   const visibleProjects = projects.filter(p => !hiddenProjects.includes(p.key));
+
+  // Notify parent of visible issue keys
+  useEffect(() => {
+    const allIssueKeys = new Set<string>();
+    Object.values(projectIssues).forEach(issues => {
+      issues.forEach(issue => allIssueKeys.add(issue.key));
+    });
+    onIssuesChange(allIssueKeys);
+  }, [projectIssues]);
 
   useEffect(() => {
     if (onRefresh > 0) {
@@ -2209,7 +2220,7 @@ function CreateIssueForm({
   );
 }
 
-function GlobalSettings({ onLogout }: { onLogout: () => void }) {
+function GlobalSettings({ onLogout, deletingWorktreeKeys, setDeletingWorktreeKeys, visibleIssueKeys }: { onLogout: () => void; deletingWorktreeKeys: Set<string>; setDeletingWorktreeKeys: React.Dispatch<React.SetStateAction<Set<string>>>; visibleIssueKeys: Set<string> }) {
   // Multi-connection state
   const [connections, setConnections] = useState<JiraConnection[]>(getJiraConnections);
   const [activeConnId, setActiveConnId] = useState<string | null>(getActiveConnectionId);
@@ -2280,7 +2291,6 @@ function GlobalSettings({ onLogout }: { onLogout: () => void }) {
   const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
   const [loadingWorktrees, setLoadingWorktrees] = useState(true);
   const [deletingWorktrees, setDeletingWorktrees] = useState(false);
-  const [deletingWorktreeKey, setDeletingWorktreeKey] = useState<string | null>(null);
 
   // Load worktrees from localStorage and scan git repos
   useEffect(() => {
@@ -2408,12 +2418,16 @@ function GlobalSettings({ onLogout }: { onLogout: () => void }) {
   };
 
   const deleteSingleWorktree = async (wt: WorktreeEntry) => {
-    setDeletingWorktreeKey(wt.key);
+    setDeletingWorktreeKeys(prev => new Set([...prev, wt.key]));
     try {
       await deleteWorktreeEntry(wt);
       setWorktrees(prev => prev.filter(w => w.key !== wt.key));
     } finally {
-      setDeletingWorktreeKey(null);
+      setDeletingWorktreeKeys(prev => {
+        const next = new Set(prev);
+        next.delete(wt.key);
+        return next;
+      });
     }
   };
 
@@ -2922,8 +2936,8 @@ function GlobalSettings({ onLogout }: { onLogout: () => void }) {
             <>
               <div className="worktree-list">
                 {worktrees.map((wt) => (
-                  <div key={wt.key} className={`worktree-item ${deletingWorktreeKey === wt.key ? "deleting" : ""} ${wt.isOrphaned ? "orphaned" : ""}`}>
-                    {deletingWorktreeKey === wt.key ? (
+                  <div key={wt.key} className={`worktree-item ${deletingWorktreeKeys.has(wt.key) ? "deleting" : ""} ${wt.isOrphaned ? "orphaned" : ""}`}>
+                    {deletingWorktreeKeys.has(wt.key) ? (
                       <div className="worktree-info">
                         <Spinner />
                         <span className="worktree-deleting-text">Deleting...</span>
@@ -2933,6 +2947,11 @@ function GlobalSettings({ onLogout }: { onLogout: () => void }) {
                         <div className="worktree-info">
                           {wt.isOrphaned ? (
                             <span className="worktree-orphaned-label">Orphaned</span>
+                          ) : !visibleIssueKeys.has(wt.issueKey) ? (
+                            <div className="worktree-issue-wrapper">
+                              <span className="worktree-issue">{wt.issueKey}</span>
+                              <span className="worktree-hidden-label">Hidden</span>
+                            </div>
                           ) : (
                             <span className="worktree-issue">{wt.issueKey}</span>
                           )}
@@ -3700,11 +3719,11 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   const isValidBranchName = (name: string): boolean => {
     if (!name) return true; // Empty is valid (will use issueKey as default)
     // Git branch naming rules
-    if (name.startsWith(".") || name.startsWith("-")) return false;
+    if (name.startsWith(".") || name.startsWith("-") || name.startsWith("/")) return false;
     if (name.endsWith(".") || name.endsWith("/") || name.endsWith(".lock")) return false;
     if (name.includes("..") || name.includes("//") || name.includes("@{")) return false;
-    // Invalid characters: space, ~, ^, :, ?, *, [, \, control chars
-    if (/[\s~^:?*\[\]\\]/.test(name)) return false;
+    // Only allow ASCII alphanumeric, dash, underscore, slash, dot
+    if (!/^[a-zA-Z0-9\-_/.]+$/.test(name)) return false;
     return true;
   };
   const branchNameError = branchMode === "new" && branchName && !isValidBranchName(branchName)
@@ -4506,7 +4525,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                           onChange={(e) => setBranchName(e.target.value)}
                           placeholder={issueKey}
                           className={branchNameError ? "input-error" : ""}
-                          title={branchNameError || ""}
                         />
                       ) : (
                         <select
@@ -4560,16 +4578,16 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                   >
                     Create Worktree
                   </button>
-                  <div className="terminal-worktree-path-preview">
-                    <span>~/.jeonghyeon/{repoPath?.split("/").pop()}/{(() => {
-                      const target = branchMode === "new" ? branchName : selectedExistingBranch;
-                      let displayName = target || "branch-name";
-                      if (displayName.startsWith("remotes/")) {
-                        displayName = displayName.split("/").slice(2).join("/");
-                      }
-                      return displayName.replace(/\//g, "-");
-                    })()}</span>
-                  </div>
+                </div>
+                <div className="terminal-worktree-path-preview">
+                  <span>~/.jeonghyeon/{repoPath?.split("/").pop()}/{(() => {
+                    const target = branchMode === "new" ? branchName : selectedExistingBranch;
+                    let displayName = target || "branch-name";
+                    if (displayName.startsWith("remotes/")) {
+                      displayName = displayName.split("/").slice(2).join("/");
+                    }
+                    return displayName.replace(/\//g, "-");
+                  })()}</span>
                 </div>
               </>
             )}
@@ -6374,6 +6392,8 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
       sessionStorage.removeItem("show_global_settings");
     }
   };
+  const [deletingWorktreeKeys, setDeletingWorktreeKeys] = useState<Set<string>>(new Set());
+  const [visibleIssueKeys, setVisibleIssueKeys] = useState<Set<string>>(new Set());
 
   // Load saved theme on mount
   useEffect(() => {
@@ -6570,6 +6590,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
             onCreateClick={handleCreateClick}
             pinnedIssues={pinnedIssues}
             onPinToggle={togglePinIssue}
+            onIssuesChange={setVisibleIssueKeys}
           />
       </div>
       {sidebarCollapsed && (
@@ -6583,7 +6604,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
       {!sidebarCollapsed && <div className="resize-handle" onMouseDown={startResizing} />}
       <div className="main-content">
         {showGlobalSettings ? (
-          <GlobalSettings onLogout={onLogout} />
+          <GlobalSettings onLogout={onLogout} deletingWorktreeKeys={deletingWorktreeKeys} setDeletingWorktreeKeys={setDeletingWorktreeKeys} visibleIssueKeys={visibleIssueKeys} />
         ) : settingsProject ? (
           <FilterSettings projectKey={settingsProject} onSave={handleSaveFilter} />
         ) : createProject ? (
