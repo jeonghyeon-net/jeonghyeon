@@ -3388,6 +3388,7 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
 
     // WKWebView Korean IME Bridge
     const xtermTextarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement;
+
     if (xtermTextarea) {
       let isComposing = false;
       let composingText = '';
@@ -3449,9 +3450,13 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
     }
 
     term.onData((data) => {
-      // printable 문자는 beforeinput에서 처리됨
-      if (data.length === 1 && data.charCodeAt(0) >= 32 && data.charCodeAt(0) < 127) {
-        return;
+      // 단일 printable 문자는 beforeinput에서 처리됨
+      // 제어 문자(0-31), DEL/백스페이스(127), escape 시퀀스(길이>1)만 여기서 처리
+      if (data.length === 1) {
+        const code = data.charCodeAt(0);
+        if (code >= 32 && code !== 127) {
+          return;
+        }
       }
       invoke("write_to_pty", { sessionId, data }).catch(console.error);
     });
