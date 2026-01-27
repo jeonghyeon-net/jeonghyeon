@@ -82,7 +82,8 @@ async fn create_pty_session(
                     break;
                 }
                 Ok(n) => {
-                    let _ = app_clone.emit(&format!("pty-output-{}", session_id), buf[..n].to_vec());
+                    let text = String::from_utf8_lossy(&buf[..n]).into_owned();
+                    let _ = app_clone.emit(&format!("pty-output-{}", session_id), text);
                 }
                 Err(_) => {
                     let _ = app_clone.emit(&format!("pty-end-{}", session_id), ());
