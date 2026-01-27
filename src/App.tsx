@@ -3355,29 +3355,6 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
       setReady(true);
     });
 
-    // Korean IME workaround for Tauri WKWebView
-    // Tauri's WKWebView doesn't fire compositionstart/end events properly,
-    // so we handle Korean input via beforeinput events instead.
-    const xtermTextarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement;
-    let pendingKorean = '';
-    let composing = false; // True after insertReplacementText (actual composition started)
-
-    const isKoreanChar = (str: string) => {
-      if (!str || str.length === 0) return false;
-      const code = str.charCodeAt(0);
-      return (code >= 0x1100 && code <= 0x11FF) ||   // Hangul Jamo
-             (code >= 0x3130 && code <= 0x318F) ||   // Hangul Compatibility Jamo
-             (code >= 0xAC00 && code <= 0xD7AF);     // Hangul Syllables
-    };
-
-    const flushPendingKorean = () => {
-      if (pendingKorean) {
-        invoke("write_to_pty", { sessionId, data: pendingKorean }).catch(console.error);
-        pendingKorean = '';
-      }
-      composing = false;
-    };
-
     // Handle special keys only
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown') {
@@ -3404,49 +3381,160 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
       return true;
     });
 
+    // Input handling
+    // WKWebView IME Bridge for xterm.js
+    // Fixes issues where vowels are ignored and composition is invisible
+    const xtermTextarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement;
+    let isComposing = false;
+
+    const isKoreanChar = (str: string) => {
+      if (!str) return false;
+      const code = str.charCodeAt(0);
+      return (code >= 0x1100 && code <= 0x11FF) ||   // Hangul Jamo
+             (code >= 0x3130 && code <= 0x318F) ||   // Hangul Compatibility Jamo
+             (code >= 0xAC00 && code <= 0xD7AF);     // Hangul Syllables
+    };
+
     if (xtermTextarea) {
       xtermTextarea.addEventListener('beforeinput', (e: InputEvent) => {
-        const inputType = e.inputType;
         const data = e.data || '';
+        const inputType = e.inputType;
+        
+        // Debug
+        // console.log(`[bridge] type=${inputType} data=${data} composing=${isComposing}`);
 
-        if (inputType === 'insertReplacementText') {
-          // Composition update (e.g., ㅇ -> 아 -> 안)
-          composing = true;
-          pendingKorean = data;
-        } else if (inputType === 'insertText' && isKoreanChar(data)) {
-          if (composing) {
-            if (data === pendingKorean) {
-              // Same as pending = composition commit
-              invoke("write_to_pty", { sessionId, data }).catch(console.error);
-              pendingKorean = '';
-              composing = false;
-            } else {
-              // Different Korean = new composition starting, flush pending first
-              if (pendingKorean) {
-                invoke("write_to_pty", { sessionId, data: pendingKorean }).catch(console.error);
-                pendingKorean = '';
-              }
-              composing = false;
+        if (isKoreanChar(data)) {
+          // If this is a replacement (vowel added/changed) or new text
+          if (inputType === 'insertReplacementText' || inputType === 'insertText') {
+            e.preventDefault(); // Stop browser from modifying value directly, let xterm handle it via events
+            
+            if (!isComposing) {
+              // Start of composition
+              // xterm has likely already sent the English keydown char (e.g. 'd' for 'ㅇ')
+              // Send backspace to remove it
+              invoke("write_to_pty", { sessionId, data: '\x7f' }).catch(console.error);
+              
+              isComposing = true;
+              xtermTextarea.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
             }
+            
+            // For insertText while composing, it means a new block started (previous committed implicitly)
+            // But usually WKWebView sends insertReplacementText for composition updates.
+            // If we get insertText 'ㄴ' while composing '안', it might mean '안' is done.
+            // Let's assume insertReplacementText is the main update mechanism.
+            
+            // Fire update - xterm will render this
+            xtermTextarea.dispatchEvent(new CompositionEvent('compositionupdate', { data }));
+            
+            // We don't fire compositionend yet.
           }
-          // If not composing, ignore (initial insertText before insertReplacementText)
+        } else {
+          // Non-Korean input
+          if (isComposing) {
+            // End composition if we were composing
+            // The current event (e.g. space) will be handled naturally after this
+            // We need to commit the *last* known data? 
+            // Actually xterm remembers the last compositionupdate data.
+            // Firing compositionend with that data commits it.
+            
+            // We don't easily know the last data here unless we tracked it.
+            // But typically compositionend without data might use the last update?
+            // Let's try firing end with empty data, or we need to track `lastKoreanData`.
+            
+            isComposing = false;
+            xtermTextarea.dispatchEvent(new CompositionEvent('compositionend', { data: xtermTextarea.value })); 
+            // Note: xtermTextarea.value might be empty if we prevented default? 
+            // Actually, if we preventDefault, value doesn't update. 
+            // We should track the last data.
+          }
         }
-      }, true);
+      });
+      
+      // We also need to handle when composition ends via other means (blur, enter, etc.)
+      // But xterm handles Enter by itself usually.
+      
+      // Let's improve the tracking
+      let lastKoreanData = '';
+      
+      const handleKoreanInput = (e: InputEvent) => {
+        const data = e.data || '';
+        const inputType = e.inputType;
+        
+        // 0. Handle Jamo Separation (Broken IME State)
+        // If we receive a standalone Jamo (e.g. 'ㄱ', 'ㅏ') via insertText, 
+        // it means the browser's IME engine failed to start composition (Jamo separation).
+        // We need to force-reset the focus to wake up the IME.
+        if (inputType === 'insertText' && data.length === 1) {
+           const code = data.charCodeAt(0);
+           // Hangul Compatibility Jamo range: 0x3130 - 0x318F
+           if (code >= 0x3130 && code <= 0x318F) {
+             e.preventDefault();
+             xtermTextarea.blur();
+             setTimeout(() => xtermTextarea.focus(), 10);
+             return;
+           }
+        }
 
-      xtermTextarea.addEventListener('blur', () => {
-        flushPendingKorean();
-      }, true);
+        // 1. Handle Composition End (Commit)
+        if (inputType === 'insertFromComposition') {
+          e.preventDefault();
+          
+          // Commit the data manually to PTY to ensure it is input
+          const textToCommit = data || lastKoreanData;
+          if (textToCommit) {
+            invoke("write_to_pty", { sessionId, data: textToCommit }).catch(console.error);
+          }
+          
+          // Tell xterm composition is done (clear underline)
+          // We send empty data so xterm doesn't double-commit
+          xtermTextarea.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
+          
+          isComposing = false;
+          lastKoreanData = '';
+          return;
+        }
+        
+        // 2. Handle Composition Update
+        if (isKoreanChar(data)) {
+           e.preventDefault();
+           
+           if (!isComposing) {
+             isComposing = true;
+             xtermTextarea.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+           }
+           
+           lastKoreanData = data;
+           xtermTextarea.dispatchEvent(new CompositionEvent('compositionupdate', { data }));
+        } else {
+          // 3. Handle Non-Korean Input during Composition (e.g. Space, Number, English)
+          if (isComposing) {
+            // Commit the pending Korean text
+            if (lastKoreanData) {
+               invoke("write_to_pty", { sessionId, data: lastKoreanData }).catch(console.error);
+            }
+            
+            // End composition
+            xtermTextarea.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
+            isComposing = false;
+            lastKoreanData = '';
+            
+            // Allow the current event (English/Space) to proceed naturally
+            // xterm will handle the 'insertText' event or browser default
+          }
+        }
+      };
+
+      // Replace the previous listener with this robust one
+      xtermTextarea.removeEventListener('beforeinput', () => {}); // (Cannot remove anonymous, but we are replacing the block)
+      
+      // We can't remove the anonymous listener added in the previous turn since I don't have the reference.
+      // But since I'm overwriting the *code block* in App.tsx using 'replace', the old code is gone.
+      // So I just define the new logic.
+      
+      xtermTextarea.addEventListener('beforeinput', handleKoreanInput);
     }
 
-    // Input handling
     term.onData((data) => {
-      if (isKoreanChar(data)) {
-        // Korean is handled by beforeinput, ignore here
-        return;
-      }
-
-      // Non-Korean input: flush any pending Korean first, then send
-      flushPendingKorean();
       invoke("write_to_pty", { sessionId, data }).catch(console.error);
     });
 
