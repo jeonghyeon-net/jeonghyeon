@@ -29,6 +29,7 @@ type Issue = {
   issueType: string;
   status: string;
   statusCategory: string;
+  dueDate: string | null;
 };
 
 type Comment = {
@@ -84,6 +85,7 @@ type IssueDetail = {
   parentSummary: string | null;
   timeTracking: TimeTracking | null;
   worklogs: Worklog[];
+  dueDate: string | null;
 };
 
 type ProjectFilter = {
@@ -926,7 +928,7 @@ async function fetchIssues(projectKey: string): Promise<Issue[]> {
   }
 
   const jql = conditions.join(" AND ") + ` ORDER BY ${filter.sortBy} ${filter.sortOrder}`;
-  const url = `${getBaseUrl()}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=summary,priority,issuetype,status&maxResults=${filter.maxResults}`;
+  const url = `${getBaseUrl()}/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&fields=summary,priority,issuetype,status,duedate&maxResults=${filter.maxResults}`;
   const res = await fetch(url, {
     headers: {
       Authorization: getAuthHeader(),
@@ -943,11 +945,12 @@ async function fetchIssues(projectKey: string): Promise<Issue[]> {
     issueType: i.fields.issuetype?.name || "",
     status: i.fields.status?.name || "",
     statusCategory: i.fields.status?.statusCategory?.key || "",
+    dueDate: i.fields.duedate || null,
   }));
 }
 
 async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
-  const url = `${getBaseUrl()}/rest/api/3/issue/${issueKey}?fields=summary,description,status,priority,assignee,reporter,created,updated,labels,components,issuetype,comment,project,parent,timetracking,worklog`;
+  const url = `${getBaseUrl()}/rest/api/3/issue/${issueKey}?fields=summary,description,status,priority,assignee,reporter,created,updated,labels,components,issuetype,comment,project,parent,timetracking,worklog,duedate`;
   const res = await fetch(url, {
     headers: {
       Authorization: getAuthHeader(),
@@ -1010,6 +1013,7 @@ async function fetchIssueDetail(issueKey: string): Promise<IssueDetail> {
     parentSummary: data.fields.parent?.fields?.summary || null,
     timeTracking,
     worklogs,
+    dueDate: data.fields.duedate || null,
   };
 }
 
@@ -1575,7 +1579,19 @@ function ProjectTree({
                 if (aPinned && !bPinned) return -1;
                 if (!aPinned && bPinned) return 1;
                 return 0;
-              }).map((issue) => (
+              }).map((issue) => {
+                const isResolved = issue.statusCategory === "done";
+                let dueDaysLeft: number | null = null;
+                if (issue.dueDate && !isResolved) {
+                  const [y, m, d] = issue.dueDate.split("-").map(Number);
+                  const due = new Date(y, m - 1, d);
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  dueDaysLeft = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                }
+                const isOverdue = dueDaysLeft !== null && dueDaysLeft < 0;
+                const isDueToday = dueDaysLeft === 0;
+                return (
                 <div
                   key={issue.id}
                   className={`tree-item file issue-item ${selectedIssue === issue.key ? "selected" : ""}`}
@@ -1587,7 +1603,7 @@ function ProjectTree({
                   <div className="issue-item-left">
                     <span className="worktree-slot">{getIssueWorktree(project.key, issue.key) && <WorktreeIcon />}</span>
                     <PriorityIcon priority={issue.priority} />
-                    <span className="issue-key">{issue.key}</span>
+                    <span className={`issue-key ${isOverdue ? "overdue" : isDueToday ? "due-today" : ""}`}>{issue.key}</span>
                     <span className="node-name">{issue.summary}</span>
                   </div>
                   <button
@@ -1598,7 +1614,7 @@ function ProjectTree({
                     {pinnedIssues.includes(issue.key) ? <UnpinIcon /> : <PinIcon />}
                   </button>
                 </div>
-              ))}
+              );})}
               {projectIssues[project.key].length === 0 && (
                 <div className="tree-item file empty">No issues</div>
               )}
@@ -3015,6 +3031,148 @@ const CloseIcon = () => (
     <line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
+
+const CalendarIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
+
+const ChevronLeftIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="15 18 9 12 15 6" />
+  </svg>
+);
+
+const ChevronRightIcon = () => (
+  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+);
+
+function DatePicker({
+  value,
+  onChange,
+  onClose,
+}: {
+  value: string;
+  onChange: (date: string | null) => void;
+  onClose: () => void;
+}) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(() => {
+    if (value) {
+      const [y] = value.split("-").map(Number);
+      return y;
+    }
+    return today.getFullYear();
+  });
+  const [viewMonth, setViewMonth] = useState(() => {
+    if (value) {
+      const [, m] = value.split("-").map(Number);
+      return m - 1;
+    }
+    return today.getMonth();
+  });
+
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [onClose]);
+
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
+  const days: (number | null)[] = [];
+  for (let i = 0; i < firstDayOfMonth; i++) days.push(null);
+  for (let i = 1; i <= daysInMonth; i++) days.push(i);
+
+  const selectedDate = value ? (() => {
+    const [y, m, d] = value.split("-").map(Number);
+    return { year: y, month: m - 1, day: d };
+  })() : null;
+
+  const isToday = (day: number) =>
+    viewYear === today.getFullYear() && viewMonth === today.getMonth() && day === today.getDate();
+
+  const isSelected = (day: number) =>
+    selectedDate && viewYear === selectedDate.year && viewMonth === selectedDate.month && day === selectedDate.day;
+
+  const handleSelect = (day: number) => {
+    const m = String(viewMonth + 1).padStart(2, "0");
+    const d = String(day).padStart(2, "0");
+    onChange(`${viewYear}-${m}-${d}`);
+    onClose();
+  };
+
+  const prevMonth = () => {
+    if (viewMonth === 0) {
+      setViewMonth(11);
+      setViewYear(viewYear - 1);
+    } else {
+      setViewMonth(viewMonth - 1);
+    }
+  };
+
+  const nextMonth = () => {
+    if (viewMonth === 11) {
+      setViewMonth(0);
+      setViewYear(viewYear + 1);
+    } else {
+      setViewMonth(viewMonth + 1);
+    }
+  };
+
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const dayNames = ["S", "M", "T", "W", "T", "F", "S"];
+
+  return (
+    <div className="date-picker" ref={containerRef}>
+      <div className="date-picker-header">
+        <button className="date-picker-nav" onClick={prevMonth}><ChevronLeftIcon /></button>
+        <span className="date-picker-title">{monthNames[viewMonth]} {viewYear}</span>
+        <button className="date-picker-nav" onClick={nextMonth}><ChevronRightIcon /></button>
+      </div>
+      <div className="date-picker-days-header">
+        {dayNames.map((d, i) => (
+          <span key={i} className={`date-picker-day-name ${i === 0 ? "sunday" : i === 6 ? "saturday" : ""}`}>{d}</span>
+        ))}
+      </div>
+      <div className="date-picker-grid">
+        {days.map((day, i) => (
+          <button
+            key={i}
+            className={`date-picker-day ${day === null ? "empty" : ""} ${day && isToday(day) ? "today" : ""} ${day && isSelected(day) ? "selected" : ""} ${i % 7 === 0 ? "sunday" : i % 7 === 6 ? "saturday" : ""}`}
+            onClick={() => day && handleSelect(day)}
+            disabled={day === null}
+          >
+            {day}
+          </button>
+        ))}
+      </div>
+      <div className="date-picker-footer">
+        <button className="date-picker-clear" onClick={() => { onChange(null); onClose(); }}>Clear</button>
+        <button className="date-picker-today" onClick={() => handleSelect(today.getDate())}>Today</button>
+      </div>
+    </div>
+  );
+}
 
 // Terminal Group: each group shows side by side, each group has its own tabs
 type TerminalGroup = {
@@ -4717,6 +4875,8 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           return comp ? { id: comp.id } : null;
         }).filter(Boolean);
         await updateIssueField(issueKey, "components", components);
+      } else if (field === "duedate") {
+        await updateIssueField(issueKey, "duedate", value);
       }
       reload();
       onRefresh();
@@ -4773,6 +4933,18 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+    });
+  };
+
+  const formatDateOnly = (dateStr: string) => {
+    if (!dateStr) return "";
+    // YYYY-MM-DD 형식은 직접 파싱 (타임존 이슈 방지)
+    const [year, month, day] = dateStr.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString("ko-KR", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
@@ -5072,6 +5244,56 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
         <div className="issue-meta-item">
           <span className="meta-label">Updated</span>
           <span className="meta-value">{formatDate(issue.updated)}</span>
+        </div>
+
+        <div className="issue-meta-item issue-meta-item-due">
+          {(() => {
+            const isResolved = issue.statusCategory === "done";
+            let daysUntilDue: number | null = null;
+            let isOverdue = false;
+            if (issue.dueDate && !isResolved) {
+              const [y, m, d] = issue.dueDate.split("-").map(Number);
+              const due = new Date(y, m - 1, d);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              daysUntilDue = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              isOverdue = daysUntilDue < 0;
+            }
+            return (
+              <>
+                <span className="meta-label">Due</span>
+                <span
+                  className="meta-value editable"
+                  onClick={() => { if (saving) return; setEditing(editing === "duedate" ? null : "duedate"); }}
+                >
+                  {issue.dueDate ? (
+                    <>
+                      {formatDateOnly(issue.dueDate)}
+                      {!isResolved && daysUntilDue !== null && (
+                        <span className={`due-badge ${isOverdue ? "overdue" : daysUntilDue === 0 ? "today" : ""}`}>
+                          {daysUntilDue === 0 ? "D-Day" : daysUntilDue > 0 ? `D-${daysUntilDue}` : `D+${Math.abs(daysUntilDue)}`}
+                        </span>
+                      )}
+                    </>
+                  ) : <span className="meta-empty">None</span>}
+                  <span className="edit-icon"><CalendarIcon /></span>
+                </span>
+              </>
+            );
+          })()}
+          {editing === "duedate" && (
+            <DatePicker
+              value={issue.dueDate || ""}
+              onChange={(date) => {
+                if (date !== issue.dueDate) {
+                  saveEdit("duedate", date);
+                } else {
+                  setEditing(null);
+                }
+              }}
+              onClose={() => setEditing(null)}
+            />
+          )}
         </div>
 
         <div className="issue-meta-item time-meta-item">
@@ -5938,7 +6160,7 @@ function ReviewRequestedPRs() {
   const popoverRef = useRef<HTMLDivElement>(null);
   const fetchIdRef = useRef(0);
 
-  const fetchPRs = useCallback(async () => {
+  const fetchPRs = useCallback(async (showCheckOnSuccess = false) => {
     const fetchId = ++fetchIdRef.current;
     setLoading(true);
     setShowCheck(false);
@@ -5952,7 +6174,7 @@ function ReviewRequestedPRs() {
       const data = JSON.parse(result);
       setPrs(data);
       setError(null);
-      setShowCheck(true);
+      if (showCheckOnSuccess) setShowCheck(true);
     } catch (e) {
       if (fetchId !== fetchIdRef.current) return;
       const errStr = String(e);
@@ -5970,8 +6192,8 @@ function ReviewRequestedPRs() {
 
   // Fetch on mount and every 5 minutes
   useEffect(() => {
-    fetchPRs();
-    const interval = setInterval(fetchPRs, 5 * 60 * 1000);
+    fetchPRs(false);
+    const interval = setInterval(() => fetchPRs(false), 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, [fetchPRs]);
 
@@ -6027,7 +6249,7 @@ function ReviewRequestedPRs() {
         <div className={`review-prs-popover ${loading ? "loading" : ""}`}>
           <div className="review-prs-header">
             <span>Review Requested</span>
-            <button className="review-prs-refresh" onClick={fetchPRs} disabled={loading} title="Refresh">
+            <button className="review-prs-refresh" onClick={() => fetchPRs(true)} disabled={loading} title="Refresh">
               {showCheck ? (
                 <svg className="review-prs-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" onAnimationEnd={() => setShowCheck(false)}>
                   <path d="M20 6L9 17l-5-5" />

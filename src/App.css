@@ -3900,3 +3900,194 @@ html, body, #root {
 .review-pr-time {
   opacity: 0.8;
 }
+
+/* Date Picker */
+.issue-meta-item-due {
+  position: relative;
+}
+
+.date-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 8px;
+  width: 200px;
+  margin-top: 4px;
+}
+
+.date-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.date-picker-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.date-picker-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  transition: background 0.12s, color 0.12s;
+}
+
+.date-picker-nav:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.date-picker-days-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  margin-bottom: 2px;
+}
+
+.date-picker-day-name {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2px 0;
+}
+
+.date-picker-day-name.sunday {
+  color: var(--error);
+}
+
+.date-picker-day-name.saturday {
+  color: var(--accent);
+}
+
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.date-picker-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.date-picker-day:not(.empty):hover {
+  background: var(--bg-hover);
+}
+
+.date-picker-day.empty {
+  cursor: default;
+}
+
+.date-picker-day.today {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.date-picker-day.selected {
+  background: var(--accent);
+  color: var(--bg-primary);
+  font-weight: 600;
+}
+
+.date-picker-day.selected:hover {
+  background: var(--accent);
+}
+
+.date-picker-day.sunday:not(.selected) {
+  color: var(--error);
+}
+
+.date-picker-day.saturday:not(.selected) {
+  color: var(--accent);
+}
+
+.date-picker-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.date-picker-clear,
+.date-picker-today {
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  border: none;
+  transition: background 0.12s;
+}
+
+.date-picker-clear {
+  background: none;
+  color: var(--text-secondary);
+}
+
+.date-picker-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.date-picker-today {
+  background: var(--accent);
+  color: var(--bg-primary);
+  font-weight: 500;
+}
+
+.date-picker-today:hover {
+  opacity: 0.9;
+}
+
+/* Due date badge and overdue styles */
+.meta-label-overdue {
+  color: var(--error) !important;
+}
+
+.due-badge {
+  font-size: 10px;
+  font-weight: 500;
+  margin-left: 4px;
+  color: var(--text-muted);
+}
+
+.due-badge.today {
+  color: var(--warning);
+}
+
+.due-badge.overdue {
+  color: var(--error);
+}
+
+/* Issue key overdue/due-today styles */
+.issue-key.overdue {
+  color: var(--error) !important;
+  font-weight: 600;
+}
+
+.issue-key.due-today {
+  color: var(--warning) !important;
+  font-weight: 600;
+}
