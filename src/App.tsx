@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, Fragment, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useRef, Fragment, useMemo, createContext, useContext } from "react";
 import { fetch } from "@tauri-apps/plugin-http";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
@@ -6906,7 +6906,7 @@ function FileDiffViewer({ issueKey, file, onBack }: {
 
     doFetch();
 
-    // Quick check - only fetch if file status changed
+    // Quick check - only fetch if file content changed
     let lastHash = "";
     const quickCheck = async () => {
       if (cancelledRef.current || fetching) return;
@@ -6914,23 +6914,23 @@ function FileDiffViewer({ issueKey, file, onBack }: {
       const currentWorktreeInfo = getIssueWorktree(projectKey, issueKey);
       if (!currentWorktreeInfo) return;
       try {
-        // Parallel: status + diff stat (staged + unstaged) for accurate change detection
-        const [statusOutput, unstagedStat, stagedStat] = await Promise.all([
+        // Use hash-object to get actual file content hash (most accurate)
+        const [statusOutput, fileHash, stagedHash] = await Promise.all([
           invoke<string>("run_git_command", {
             cwd: currentWorktreeInfo.path,
             args: ["status", "--porcelain", "--", file.path],
           }).catch(() => ""),
           invoke<string>("run_git_command", {
             cwd: currentWorktreeInfo.path,
-            args: ["diff", "--shortstat", "--", file.path],
+            args: ["hash-object", file.path],
           }).catch(() => ""),
           invoke<string>("run_git_command", {
             cwd: currentWorktreeInfo.path,
-            args: ["diff", "--shortstat", "--cached", "--", file.path],
+            args: ["ls-files", "-s", "--", file.path],
           }).catch(() => ""),
         ]);
 
-        const currentHash = statusOutput + unstagedStat + stagedStat;
+        const currentHash = statusOutput + fileHash + stagedHash;
         if (!cancelledRef.current && currentHash !== lastHash) {
           lastHash = currentHash;
           doFetch();
@@ -7702,14 +7702,25 @@ type GitHubPR = {
   updatedAt: string;
 };
 
-// My PRs Component
-function MyPRs() {
-  const [prs, setPrs] = useState<GitHubPR[]>([]);
+// PR Data Context - Single GraphQL query for both MyPRs and ReviewRequestedPRs
+type PRDataContextType = {
+  myPRs: GitHubPR[];
+  reviewRequestedPRs: GitHubPR[];
+  loading: boolean;
+  error: string | null;
+  refresh: (showCheckOnSuccess?: boolean) => void;
+  showCheck: boolean;
+  setShowCheck: (v: boolean) => void;
+};
+
+const PRDataContext = createContext<PRDataContextType | null>(null);
+
+function PRDataProvider({ children }: { children: React.ReactNode }) {
+  const [myPRs, setMyPRs] = useState<GitHubPR[]>([]);
+  const [reviewRequestedPRs, setReviewRequestedPRs] = useState<GitHubPR[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showPopover, setShowPopover] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCheck, setShowCheck] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
   const fetchIdRef = useRef(0);
 
   const fetchPRs = useCallback(async (showCheckOnSuccess = false) => {
@@ -7718,13 +7729,44 @@ function MyPRs() {
     setShowCheck(false);
     try {
       const homeDir: string = await invoke("get_home_dir");
+      const query = `{
+        myPRs: search(query: "is:pr is:open author:@me archived:false", type: ISSUE, first: 30) {
+          nodes {
+            ... on PullRequest {
+              number
+              title
+              url
+              repository { nameWithOwner }
+              author { login }
+              createdAt
+              updatedAt
+            }
+          }
+        }
+        reviewRequested: search(query: "is:pr is:open review-requested:@me archived:false", type: ISSUE, first: 30) {
+          nodes {
+            ... on PullRequest {
+              number
+              title
+              url
+              repository { nameWithOwner }
+              author { login }
+              createdAt
+              updatedAt
+            }
+          }
+        }
+      }`;
       const result: string = await invoke("run_gh_command", {
         cwd: homeDir,
-        args: ["search", "prs", "--author=@me", "--state=open", "--archived=false", "--json", "number,title,url,repository,author,createdAt,updatedAt", "--limit", "30"]
+        args: ["api", "graphql", "-f", `query=${query}`]
       });
       if (fetchId !== fetchIdRef.current) return;
       const data = JSON.parse(result);
-      setPrs(data);
+      const transformNodes = (nodes: unknown[]): GitHubPR[] =>
+        nodes.filter((n): n is GitHubPR => n !== null && typeof n === "object" && "number" in n);
+      setMyPRs(transformNodes(data?.data?.myPRs?.nodes || []));
+      setReviewRequestedPRs(transformNodes(data?.data?.reviewRequested?.nodes || []));
       setError(null);
       if (showCheckOnSuccess) setShowCheck(true);
     } catch (e) {
@@ -7748,6 +7790,47 @@ function MyPRs() {
     return () => clearInterval(interval);
   }, [fetchPRs]);
 
+  const value = useMemo(() => ({
+    myPRs,
+    reviewRequestedPRs,
+    loading,
+    error,
+    refresh: fetchPRs,
+    showCheck,
+    setShowCheck,
+  }), [myPRs, reviewRequestedPRs, loading, error, fetchPRs, showCheck]);
+
+  return <PRDataContext.Provider value={value}>{children}</PRDataContext.Provider>;
+}
+
+function usePRData() {
+  const ctx = useContext(PRDataContext);
+  if (!ctx) throw new Error("usePRData must be used within PRDataProvider");
+  return ctx;
+}
+
+// Shared helpers
+function formatTimeAgo(date: Date | string | undefined | null) {
+  if (!date) return "";
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (isNaN(d.getTime())) return "";
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor(diff / (1000 * 60));
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  if (minutes > 0) return `${minutes}m ago`;
+  return "just now";
+}
+
+// My PRs Component
+function MyPRs() {
+  const { myPRs: prs, loading, error, refresh, showCheck, setShowCheck } = usePRData();
+  const [showPopover, setShowPopover] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!showPopover) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -7768,21 +7851,6 @@ function MyPRs() {
     };
   }, [showPopover]);
 
-  const formatTimeAgo = (date: Date | string | undefined | null) => {
-    if (!date) return "";
-    const d = typeof date === "string" ? new Date(date) : date;
-    if (isNaN(d.getTime())) return "";
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor(diff / (1000 * 60));
-    if (days > 0) return `${days}d ago`;
-    if (hours > 0) return `${hours}h ago`;
-    if (minutes > 0) return `${minutes}m ago`;
-    return "just now";
-  };
-
   return (
     <div className="my-prs" ref={popoverRef}>
       <button
@@ -7799,7 +7867,7 @@ function MyPRs() {
         <div className={`my-prs-popover ${loading ? "loading" : ""}`}>
           <div className="my-prs-header">
             <span>My Pull Requests</span>
-            <button className="my-prs-refresh" onClick={() => fetchPRs(true)} disabled={loading} title="Refresh">
+            <button className="my-prs-refresh" onClick={() => refresh(true)} disabled={loading} title="Refresh">
               {showCheck ? (
                 <svg className="my-prs-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" onAnimationEnd={() => setShowCheck(false)}>
                   <path d="M20 6L9 17l-5-5" />
@@ -7851,55 +7919,11 @@ function MyPRs() {
 }
 
 // Review Requested PRs Component
-type ReviewRequestedPR = GitHubPR;
-
 function ReviewRequestedPRs() {
-  const [prs, setPrs] = useState<ReviewRequestedPR[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { reviewRequestedPRs: prs, loading, error, refresh, showCheck, setShowCheck } = usePRData();
   const [showPopover, setShowPopover] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [showCheck, setShowCheck] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const fetchIdRef = useRef(0);
 
-  const fetchPRs = useCallback(async (showCheckOnSuccess = false) => {
-    const fetchId = ++fetchIdRef.current;
-    setLoading(true);
-    setShowCheck(false);
-    try {
-      const homeDir: string = await invoke("get_home_dir");
-      const result: string = await invoke("run_gh_command", {
-        cwd: homeDir,
-        args: ["search", "prs", "--review-requested=@me", "--state=open", "--archived=false", "--json", "number,title,url,repository,author,createdAt,updatedAt", "--limit", "30"]
-      });
-      if (fetchId !== fetchIdRef.current) return;
-      const data = JSON.parse(result);
-      setPrs(data);
-      setError(null);
-      if (showCheckOnSuccess) setShowCheck(true);
-    } catch (e) {
-      if (fetchId !== fetchIdRef.current) return;
-      const errStr = String(e);
-      if (errStr.includes("gh auth login") || errStr.includes("not logged")) {
-        setError("gh CLI not authenticated. Run 'gh auth login' in terminal.");
-      } else if (errStr.includes("command not found") || errStr.includes("Failed to execute gh")) {
-        setError("gh CLI not installed. Install from https://cli.github.com");
-      } else {
-        setError(errStr.length > 100 ? errStr.slice(0, 100) + "..." : errStr);
-      }
-    } finally {
-      if (fetchId === fetchIdRef.current) setLoading(false);
-    }
-  }, []);
-
-  // Fetch on mount and every 5 minutes
-  useEffect(() => {
-    fetchPRs(false);
-    const interval = setInterval(() => fetchPRs(false), 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [fetchPRs]);
-
-  // Click outside or Escape to close
   useEffect(() => {
     if (!showPopover) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -7920,21 +7944,6 @@ function ReviewRequestedPRs() {
     };
   }, [showPopover]);
 
-  const formatTimeAgo = (date: Date | string | undefined | null) => {
-    if (!date) return "";
-    const d = typeof date === "string" ? new Date(date) : date;
-    if (isNaN(d.getTime())) return "";
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor(diff / (1000 * 60));
-    if (days > 0) return `${days}d ago`;
-    if (hours > 0) return `${hours}h ago`;
-    if (minutes > 0) return `${minutes}m ago`;
-    return "just now";
-  };
-
   return (
     <div className="review-prs" ref={popoverRef}>
       <button
@@ -7951,7 +7960,7 @@ function ReviewRequestedPRs() {
         <div className={`review-prs-popover ${loading ? "loading" : ""}`}>
           <div className="review-prs-header">
             <span>Review Requested</span>
-            <button className="review-prs-refresh" onClick={() => fetchPRs(true)} disabled={loading} title="Refresh">
+            <button className="review-prs-refresh" onClick={() => refresh(true)} disabled={loading} title="Refresh">
               {showCheck ? (
                 <svg className="review-prs-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" onAnimationEnd={() => setShowCheck(false)}>
                   <path d="M20 6L9 17l-5-5" />
@@ -8442,8 +8451,10 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
       <div className="status-bar-left">
         <PomodoroTimer />
         <QuickMemo />
-        <ReviewRequestedPRs />
-        <MyPRs />
+        <PRDataProvider>
+          <ReviewRequestedPRs />
+          <MyPRs />
+        </PRDataProvider>
       </div>
       <div className="status-bar-right">
         <SystemStatsDisplay />
