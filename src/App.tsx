@@ -6849,9 +6849,9 @@ function FileDiffViewer({ issueKey, file, onBack }: {
               const chars = Array.from(text); // Handle surrogate pairs (emojis)
               for (let c = 0; c < chars.length; c++) {
                 if (chars[c] === ' ') {
-                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-space"> </span>);
+                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-space">·</span>);
                 } else if (chars[c] === '\t') {
-                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-tab">{'\t'}</span>);
+                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-tab">→</span>);
                 } else {
                   parts.push(chars[c]);
                 }
@@ -6888,8 +6888,19 @@ function FileDiffViewer({ issueKey, file, onBack }: {
   // Default context lines to show around changes
   const CONTEXT_PREVIEW = 3;
 
+  const handleCopy = (e: React.ClipboardEvent) => {
+    const selection = window.getSelection();
+    if (selection) {
+      const text = selection.toString()
+        .replace(/·/g, ' ')
+        .replace(/→/g, '\t');
+      e.clipboardData.setData('text/plain', text);
+      e.preventDefault();
+    }
+  };
+
   return (
-    <div className="file-diff-viewer" tabIndex={0}>
+    <div className="file-diff-viewer" tabIndex={0} onCopy={handleCopy}>
       <div className="file-diff-back-row">
         <button className="file-diff-back" onClick={onBack} title="Back to issue">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
