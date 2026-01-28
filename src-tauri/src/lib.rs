@@ -407,7 +407,9 @@ async fn run_git_command(cwd: String, args: Vec<String>) -> Result<String, Strin
             .output()
             .map_err(|e| format!("Failed to execute git: {}", e))?;
 
-        if output.status.success() {
+        // git diff returns exit code 1 when there are differences, which is not an error
+        let is_diff_command = args.first().map(|s| s == "diff").unwrap_or(false);
+        if output.status.success() || (is_diff_command && output.status.code() == Some(1)) {
             String::from_utf8(output.stdout)
                 .map_err(|e| format!("Invalid UTF-8: {}", e))
         } else {

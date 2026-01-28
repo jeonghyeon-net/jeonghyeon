@@ -79,6 +79,12 @@ html {
   --pr-closed-bg: rgba(214, 109, 109, 0.12);
   --pr-closed-bg-hover: rgba(214, 109, 109, 0.2);
   --pr-draft: #8a8a8a;
+
+  /* === Diff Status Colors === */
+  --status-added: #5eba70;
+  --status-deleted: #d66d6d;
+  --status-modified: #c9a344;
+  --status-renamed: #a78bda;
   --pr-draft-bg: rgba(138, 138, 138, 0.12);
   --pr-draft-bg-hover: rgba(138, 138, 138, 0.2);
 
@@ -280,6 +286,240 @@ html, body, #root {
 .sidebar-expand:hover {
   opacity: 1;
   background: var(--bg-hover);
+}
+
+.sidebar-expand-right {
+  border-right: none;
+  border-left: 1px solid var(--border);
+  padding: 28px 4px 8px 2px;
+}
+
+.sidebar-expand-right svg,
+.right-sidebar .sidebar-toggle svg {
+  transform: scaleX(-1);
+}
+
+.right-sidebar {
+  display: flex;
+  flex-direction: row;
+  padding-top: 0;
+}
+
+.right-sidebar .resize-handle-right {
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.right-sidebar-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding-top: 20px;
+  overflow: hidden;
+}
+
+.right-sidebar .sidebar-header {
+  justify-content: space-between;
+  padding: 10px 8px 6px 2px;
+}
+
+.diff-stat-add {
+  color: var(--status-added);
+}
+
+.diff-stat-del {
+  color: var(--status-deleted);
+}
+
+.diff-line-stats {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.right-sidebar-content {
+  padding: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Diff File Tree */
+.diff-tree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.diff-tree-header {
+  padding: var(--sidebar-item-padding);
+  height: var(--sidebar-item-height);
+  font-size: var(--sidebar-item-font-size);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.diff-tree-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-tree-mode-label {
+  color: var(--text-muted);
+  font-size: var(--sidebar-item-font-size);
+}
+
+.diff-tree-base-dropdown {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 0;
+  flex: 1;
+  max-width: 200px;
+  padding: 2px 18px 2px 6px;
+  font-family: inherit;
+  font-size: var(--sidebar-item-font-size);
+  color: var(--text-muted);
+  background: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg width='8' height='8' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2.5 4L5 6.5L7.5 4' stroke='%2371717a' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer !important;
+  outline: none;
+  transition: all 0.12s;
+}
+
+.diff-tree-base-dropdown:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+  background-image: url("data:image/svg+xml,%3Csvg width='8' height='8' viewBox='0 0 10 10' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M2.5 4L5 6.5L7.5 4' stroke='%23e4e4e7' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+.diff-tree-base-dropdown:focus {
+  color: var(--text);
+  border-color: var(--border-focus);
+}
+
+.diff-tree-view-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.diff-tree-view-toggle:hover {
+  opacity: 1;
+  color: var(--text);
+}
+
+.diff-tree-view-toggle svg {
+  width: var(--sidebar-icon-size);
+  height: var(--sidebar-icon-size);
+}
+
+.diff-tree-count {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.diff-tree-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.diff-tree-empty {
+  padding: var(--sidebar-item-padding);
+  color: var(--text-muted);
+  font-size: var(--sidebar-item-font-size);
+  opacity: 0.5;
+}
+
+.diff-tree-no-worktree {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: var(--sidebar-item-font-size);
+  opacity: 0.5;
+}
+
+.diff-tree-item,
+.diff-tree-item * {
+  cursor: pointer !important;
+}
+
+.diff-tree-item {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  font-size: var(--sidebar-item-font-size);
+  gap: 3px;
+  color: var(--text-muted);
+}
+
+.diff-tree-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.diff-tree-dir {
+  color: var(--text-muted);
+}
+
+.diff-tree-dir:hover {
+  color: var(--text);
+}
+
+.diff-tree-chevron {
+  width: 12px;
+  height: 12px;
+  opacity: 0.4;
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+
+.diff-tree-chevron.open {
+  transform: rotate(90deg);
+}
+
+.diff-tree-item:hover .diff-tree-chevron {
+  opacity: 0.7;
+}
+
+.diff-tree-status {
+  font-size: 9px;
+  font-weight: 600;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.diff-tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-tree-file {
+  padding-left: 12px;
+}
+
+.diff-tree-file .diff-tree-name {
+  margin-left: 4px;
 }
 
 .sidebar-header {
@@ -548,6 +788,7 @@ html, body, #root {
 
 .main-content {
   flex: 1;
+  min-width: 0;
   height: 100%;
   padding-top: 20px;
   background: var(--bg-primary);
