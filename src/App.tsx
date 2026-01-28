@@ -3498,6 +3498,11 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
     // Handle special keys only
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === 'keydown') {
+        // Maximize terminal shortcut: let it bubble to window
+        if (matchesShortcut(e, getShortcuts().maximizeTerminal)) {
+          return false;
+        }
+
         // Cmd+K to clear terminal (like macOS Terminal)
         if (e.metaKey && e.key === 'k' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
           term.clear();
@@ -8109,6 +8114,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
     setSettingsProject(null);
     setCreateProject(null);
     setShowGlobalSettings(false);
+    setTerminalMaximized(false);
   };
 
   const handleSettingsClick = (projectKey: string) => {
@@ -8262,7 +8268,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
             <DiffFileTree
               issueKey={selectedIssue}
               onFilesCountChange={setDiffFilesCount}
-              onFileSelect={setSelectedDiffFile}
+              onFileSelect={(file) => { setSelectedDiffFile(file); setTerminalMaximized(false); }}
               selectedFile={selectedDiffFile?.path}
               refreshTrigger={refreshTrigger}
             />
