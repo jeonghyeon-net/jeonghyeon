@@ -5976,19 +5976,28 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
       return;
     }
 
-    setBaseBranch(worktreeInfo.baseBranch || "main");
-
-    // Fetch branches from main repo
+    // Fetch branches from main repo and detect default branch
     if (projectRepoPath) {
-      invoke<string>("run_git_command", {
-        cwd: projectRepoPath,
-        args: ["branch"],
-      }).then(output => {
-        const branchList = output.trim().split("\n")
+      Promise.all([
+        invoke<string>("run_git_command", {
+          cwd: projectRepoPath,
+          args: ["branch"],
+        }).catch(() => ""),
+        invoke<string>("run_git_command", {
+          cwd: projectRepoPath,
+          args: ["rev-parse", "--abbrev-ref", "HEAD"],
+        }).catch(() => ""),
+      ]).then(([branchOutput, currentBranch]) => {
+        const branchList = branchOutput.trim().split("\n")
           .map(b => b.replace(/^[\*\+]?\s*/, "").trim())
           .filter(Boolean);
         setBranches(branchList);
-      }).catch(() => setBranches([]));
+
+        const defaultBranch = currentBranch.trim() || branchList[0] || "";
+        setBaseBranch(worktreeInfo.baseBranch || defaultBranch);
+      });
+    } else {
+      setBaseBranch(worktreeInfo.baseBranch || "");
     }
   }, [issueKey]);
 
