@@ -32,6 +32,99 @@ impl Default for PtyState {
     }
 }
 
+/// Find the safe boundary to emit, excluding incomplete escape sequences at the end.
+/// Returns the byte index up to which it's safe to emit.
+fn find_safe_emit_boundary(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+
+    if len == 0 {
+        return 0;
+    }
+
+    // Look for ESC (0x1b) in the last 64 bytes (escape sequences are typically short)
+    let search_start = len.saturating_sub(64);
+
+    // Find the last ESC character
+    let mut last_esc = None;
+    for i in (search_start..len).rev() {
+        if bytes[i] == 0x1b {
+            last_esc = Some(i);
+            break;
+        }
+    }
+
+    let esc_pos = match last_esc {
+        Some(pos) => pos,
+        None => return len, // No ESC found, safe to emit all
+    };
+
+    // Check if the escape sequence starting at esc_pos is complete
+    let seq = &bytes[esc_pos..];
+
+    if is_escape_sequence_complete(seq) {
+        return len; // Complete sequence, safe to emit all
+    }
+
+    // Incomplete sequence, emit up to the ESC
+    esc_pos
+}
+
+/// Check if an escape sequence is complete.
+/// Returns true if the sequence is complete or not a recognized escape sequence.
+fn is_escape_sequence_complete(seq: &[u8]) -> bool {
+    if seq.is_empty() || seq[0] != 0x1b {
+        return true;
+    }
+
+    if seq.len() == 1 {
+        return false; // Just ESC, incomplete
+    }
+
+    match seq[1] {
+        // CSI sequence: ESC [ ... (ends with 0x40-0x7E)
+        b'[' => {
+            if seq.len() == 2 {
+                return false; // Just ESC [, incomplete
+            }
+            // Look for terminating character (0x40-0x7E: @A-Z[\]^_`a-z{|}~)
+            for &b in &seq[2..] {
+                if (0x40..=0x7E).contains(&b) {
+                    return true; // Found terminator
+                }
+            }
+            false // No terminator found
+        }
+        // OSC sequence: ESC ] ... (ends with BEL or ST)
+        b']' => {
+            for i in 2..seq.len() {
+                if seq[i] == 0x07 {
+                    return true; // BEL terminator
+                }
+                if seq[i] == 0x1b && i + 1 < seq.len() && seq[i + 1] == b'\\' {
+                    return true; // ST terminator (ESC \)
+                }
+            }
+            false
+        }
+        // DCS sequence: ESC P ... (ends with ST)
+        b'P' => {
+            for i in 2..seq.len() {
+                if seq[i] == 0x1b && i + 1 < seq.len() && seq[i + 1] == b'\\' {
+                    return true; // ST terminator
+                }
+            }
+            false
+        }
+        // Single character sequences (complete with just one char after ESC)
+        b'7' | b'8' | b'=' | b'>' | b'c' | b'D' | b'E' | b'H' | b'M' | b'N' | b'O' | b'Z' => true,
+        // SS2/SS3: ESC N/O followed by one character
+        // Already covered above as single char
+        // Unknown or other sequences - assume complete to avoid blocking
+        _ => true,
+    }
+}
+
 #[tauri::command]
 async fn create_pty_session(
     app: AppHandle,
@@ -104,14 +197,22 @@ async fn create_pty_session(
                         // Safe: we just validated this range is valid UTF-8
                         let text = unsafe {
                             std::str::from_utf8_unchecked(&pending[..valid_up_to])
-                        }.to_owned();
-                        let _ = app_clone.emit(&format!("pty-output-{}", session_id), text);
-                        pending.drain(..valid_up_to);
+                        };
+
+                        // Find incomplete escape sequence at the end
+                        // ESC = 0x1b, look for unterminated sequences
+                        let emit_up_to = find_safe_emit_boundary(text);
+
+                        if emit_up_to > 0 {
+                            let to_emit = text[..emit_up_to].to_owned();
+                            let _ = app_clone.emit(&format!("pty-output-{}", session_id), to_emit);
+                            pending.drain(..emit_up_to);
+                        }
                     }
 
-                    // Keep incomplete sequence in pending (max 4 bytes for UTF-8)
-                    // If pending grows too large without valid UTF-8, it's corrupted data
-                    if pending.len() > 16 {
+                    // Keep incomplete sequence in pending (max 4 bytes for UTF-8 + reasonable escape seq)
+                    // If pending grows too large, it's corrupted data
+                    if pending.len() > 128 {
                         // Force flush as lossy to prevent memory buildup
                         let text = String::from_utf8_lossy(&pending).into_owned();
                         let _ = app_clone.emit(&format!("pty-output-{}", session_id), text);

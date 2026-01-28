@@ -3289,6 +3289,75 @@ const terminalCache = new Map<number, {
 // Global terminal titles (sessionId -> title)
 const terminalTitles = new Map<number, string>();
 
+// Find safe boundary to write, excluding incomplete escape sequences at the end
+function findSafeWriteBoundary(text: string): number {
+  const len = text.length;
+  if (len === 0) return 0;
+
+  // Look for ESC (0x1b) in the last 64 chars
+  const searchStart = Math.max(0, len - 64);
+  let lastEsc = -1;
+
+  for (let i = len - 1; i >= searchStart; i--) {
+    if (text.charCodeAt(i) === 0x1b) {
+      lastEsc = i;
+      break;
+    }
+  }
+
+  if (lastEsc === -1) return len; // No ESC found
+
+  // Check if sequence starting at lastEsc is complete
+  const seq = text.slice(lastEsc);
+
+  if (isEscapeSequenceComplete(seq)) {
+    return len; // Complete, safe to write all
+  }
+
+  return lastEsc; // Incomplete, write up to ESC
+}
+
+function isEscapeSequenceComplete(seq: string): boolean {
+  if (seq.length === 0 || seq.charCodeAt(0) !== 0x1b) return true;
+  if (seq.length === 1) return false; // Just ESC
+
+  const second = seq.charCodeAt(1);
+
+  // CSI: ESC [ ... (ends with 0x40-0x7E)
+  if (second === 0x5b) { // '['
+    if (seq.length === 2) return false;
+    for (let i = 2; i < seq.length; i++) {
+      const c = seq.charCodeAt(i);
+      if (c >= 0x40 && c <= 0x7e) return true;
+    }
+    return false;
+  }
+
+  // OSC: ESC ] ... (ends with BEL or ST)
+  if (second === 0x5d) { // ']'
+    for (let i = 2; i < seq.length; i++) {
+      if (seq.charCodeAt(i) === 0x07) return true; // BEL
+      if (seq.charCodeAt(i) === 0x1b && i + 1 < seq.length && seq.charCodeAt(i + 1) === 0x5c) {
+        return true; // ST (ESC \)
+      }
+    }
+    return false;
+  }
+
+  // DCS: ESC P ... (ends with ST)
+  if (second === 0x50) { // 'P'
+    for (let i = 2; i < seq.length; i++) {
+      if (seq.charCodeAt(i) === 0x1b && i + 1 < seq.length && seq.charCodeAt(i + 1) === 0x5c) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Single char sequences - complete
+  return true;
+}
+
 function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: {
   sessionId: number;
   fontSize: number;
@@ -3529,8 +3598,23 @@ function TerminalInstance({ sessionId, fontSize, onSessionEnd, onTitleChange }: 
     pollForegroundProcess();
 
     const setupListeners = async () => {
+      // Buffer for incomplete escape sequences
+      let pendingData = '';
+
       unlistenOutput = await listen<string>(`pty-output-${sessionId}`, (event) => {
-        term.write(event.payload);
+        const data = pendingData + event.payload;
+        const safeEnd = findSafeWriteBoundary(data);
+
+        if (safeEnd > 0) {
+          term.write(data.slice(0, safeEnd));
+        }
+        pendingData = data.slice(safeEnd);
+
+        // Prevent memory buildup - force flush if too large
+        if (pendingData.length > 256) {
+          term.write(pendingData);
+          pendingData = '';
+        }
       });
 
       unlistenEnd = await listen(`pty-end-${sessionId}`, () => {
