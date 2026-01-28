@@ -4594,7 +4594,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   // Show worktree setup UI if no worktree exists
   if (!worktreeInfo) {
     return (
-      <div className={`terminal-panel ${isMaximized && !isCollapsed ? "maximized" : ""}`} style={{ height: isCollapsed ? 32 : isMaximized ? "100%" : terminalHeight }}>
+      <div className={`terminal-panel ${isMaximized && !isCollapsed ? "maximized" : ""} ${isMaximized && !isCollapsed ? "no-worktree" : ""}`} style={{ height: isCollapsed ? 32 : isMaximized ? "100%" : terminalHeight }}>
         {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onPointerDown={handleResizeStart} />}
         <div className="terminal-header">
           <span className="terminal-header-title">TERMINAL</span>
@@ -4608,7 +4608,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           </div>
         </div>
         {!isCollapsed && (
-          <div className="terminal-worktree-setup">
+          <div className={`terminal-worktree-setup ${isMaximized ? 'maximized' : ''}`}>
             {isDeletingWorktree ? (
               <div className="terminal-worktree-loading">
                 <div className="terminal-worktree-spinner" />
@@ -6543,14 +6543,28 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
   };
 
   if (!issueKey) {
-    return <div className="diff-tree-no-worktree">Issue not selected</div>;
+    return (
+      <div className="diff-tree">
+        <div className="diff-tree-header">
+          <span className="diff-tree-header-spacer" />
+        </div>
+        <div className="diff-tree-empty-message">Issue not selected</div>
+      </div>
+    );
   }
 
   const projectKey = getProjectKeyFromIssueKey(issueKey);
   const worktreeInfo = getIssueWorktree(projectKey, issueKey);
 
   if (!worktreeInfo) {
-    return <div className="diff-tree-no-worktree">Worktree not created</div>;
+    return (
+      <div className="diff-tree">
+        <div className="diff-tree-header">
+          <span className="diff-tree-header-spacer" />
+        </div>
+        <div className="diff-tree-empty-message">Worktree not created</div>
+      </div>
+    );
   }
 
   return (

@@ -474,11 +474,16 @@ html, body, #root {
   opacity: 0.5;
 }
 
-.diff-tree-no-worktree {
+.diff-tree-header-spacer {
+  display: block;
+  height: calc(var(--sidebar-icon-size) + 7px);
+}
+
+.diff-tree-empty-message {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
   color: var(--text-muted);
   font-size: var(--sidebar-item-font-size);
   opacity: 0.5;
@@ -3121,6 +3126,10 @@ html, body, #root {
   gap: 16px;
   padding: 24px;
   contain: layout;
+}
+
+.terminal-panel.maximized.no-worktree {
+  padding-top: 28px;
 }
 
 .terminal-worktree-loading {
