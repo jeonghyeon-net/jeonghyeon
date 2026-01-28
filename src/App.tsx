@@ -3829,7 +3829,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   const [activeGroupId, setActiveGroupIdState] = useState<number | null>(savedState.activeGroupId);
   const [nextGroupId, setNextGroupIdState] = useState(savedState.nextGroupId);
   const [terminalHeight, setTerminalHeightState] = useState(savedState.terminalHeight);
-  const [isResizing, setIsResizing] = useState(false);
   const [terminalFontSize] = useState(getTerminalFontSize);
   const [resizingGroupIndex, setResizingGroupIndex] = useState<number | null>(null);
   const groupsContainerRef = useRef<HTMLDivElement>(null);
@@ -4431,22 +4430,24 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
 
   // No cleanup on issueKey change - terminals persist per issue
 
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+  const handleResizeStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
-    if (!isMaximized) setIsResizing(true);
-  }, [isMaximized]);
+    if (isMaximized) return;
 
-  useEffect(() => {
-    if (!isResizing) return;
-    const onMove = (e: MouseEvent) => {
-      const h = window.innerHeight - e.clientY - 22;
-      if (h >= 150 && h <= window.innerHeight - 80) setTerminalHeight(h);
+    const onMove = (ev: PointerEvent) => {
+      const h = window.innerHeight - ev.clientY - 22;
+      const clamped = Math.max(150, Math.min(h, window.innerHeight - 91));
+      setTerminalHeight(clamped);
     };
-    const onUp = () => setIsResizing(false);
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-    return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
-  }, [isResizing]);
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+  }, [isMaximized]);
 
   // Group width resize handler
   const handleGroupResizeStart = useCallback((index: number) => (e: React.MouseEvent) => {
@@ -4558,7 +4559,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   if (!repoPath) {
     return (
       <div className={`terminal-panel ${isMaximized && !isCollapsed ? "maximized" : ""}`} style={{ height: isCollapsed ? 32 : isMaximized ? "100%" : terminalHeight }}>
-        {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onMouseDown={handleResizeStart} />}
+        {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onPointerDown={handleResizeStart} />}
         <div className="terminal-header">
           <span className="terminal-header-title">TERMINAL</span>
           <div className="terminal-header-actions">
@@ -4594,7 +4595,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   if (!worktreeInfo) {
     return (
       <div className={`terminal-panel ${isMaximized && !isCollapsed ? "maximized" : ""}`} style={{ height: isCollapsed ? 32 : isMaximized ? "100%" : terminalHeight }}>
-        {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onMouseDown={handleResizeStart} />}
+        {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onPointerDown={handleResizeStart} />}
         <div className="terminal-header">
           <span className="terminal-header-title">TERMINAL</span>
           <div className="terminal-header-actions">
@@ -4743,7 +4744,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
 
   return (
     <div className={`terminal-panel ${isMaximized && !isCollapsed ? "maximized" : ""}`} style={{ height: isCollapsed ? 32 : isMaximized ? "100%" : terminalHeight }}>
-      {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onMouseDown={handleResizeStart} />}
+      {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onPointerDown={handleResizeStart} />}
       <div className="terminal-header">
         <div className="terminal-header-left">
           <span className="terminal-header-title">TERMINAL</span>
@@ -7070,14 +7071,12 @@ function FileDiffViewer({ issueKey, file, onBack }: {
 
   return (
     <div className="file-diff-viewer" tabIndex={0}>
-      <div className="file-diff-back-row">
+      <div className="file-diff-header">
         <button className="file-diff-back" onClick={onBack} title="Back to issue">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="15 18 9 12 15 6" />
           </svg>
         </button>
-      </div>
-      <div className="file-diff-header">
         <span className="file-diff-status" style={{ color: `var(--status-${displayedFile.status === "A" ? "added" : displayedFile.status === "D" ? "deleted" : "modified"})` }}>
           {displayedFile.status}
         </span>

@@ -269,7 +269,7 @@ html, body, #root {
 .sidebar-toggle-row {
   display: flex;
   justify-content: flex-end;
-  padding: 10px 2px 2px 8px;
+  padding: 20px 2px 2px 8px;
   position: sticky;
   top: 0;
   background: var(--bg-primary);
@@ -343,7 +343,7 @@ html, body, #root {
 
 .right-sidebar .sidebar-header {
   justify-content: space-between;
-  padding: 10px 8px 2px 2px;
+  padding: 20px 8px 2px 2px;
   border-bottom: none;
   top: 0;
 }
@@ -586,7 +586,8 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 6px 3px 6px;
+  margin-top: 0;
+  padding: 34px 6px 3px 6px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -973,14 +974,14 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 2px 10px 8px;
+  padding: 8px 2px 6px 8px;
   font-size: var(--sidebar-header-font-size);
   font-weight: 500;
   color: var(--text-muted);
   letter-spacing: 0.03em;
   border-bottom: 1px solid var(--border);
   position: sticky;
-  top: 30px;
+  top: 40px;
   background: var(--bg-primary);
   z-index: 1;
 }
@@ -993,6 +994,7 @@ html, body, #root {
   border: none;
   border-radius: 3px;
   padding: 2px 6px;
+  margin-right: 4px;
   cursor: pointer !important;
   opacity: 0.8;
 }
