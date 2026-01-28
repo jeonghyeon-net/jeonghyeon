@@ -393,6 +393,8 @@ html, body, #root {
 .diff-tree-mode-label {
   color: var(--text-muted);
   font-size: var(--sidebar-item-font-size);
+  padding: 2px 6px;
+  border: 1px solid transparent;
 }
 
 .diff-tree-base-dropdown {

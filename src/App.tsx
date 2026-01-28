@@ -5925,11 +5925,12 @@ function buildDiffTree(files: DiffFile[]): DiffTreeNode[] {
 const diffTreeExpandedPaths = new Map<string, Set<string>>();
 
 
-function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile }: {
+function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile, refreshTrigger }: {
   issueKey: string | null;
   onFilesCountChange?: (count: number) => void;
   onFileSelect?: (file: DiffFile | null) => void;
   selectedFile?: string | null;
+  refreshTrigger?: number;
 }) {
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [tree, setTree] = useState<DiffTreeNode[]>([]);
@@ -6003,13 +6004,19 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
     }
   };
 
+  // Track previous issueKey to only reset on issue change
+  const prevIssueKeyRef = useRef<string | null>(null);
+
   // Fetch diff
   useEffect(() => {
-    // Reset state immediately when issue changes
-    setFiles([]);
-    setTree([]);
-    setLineStats({ additions: 0, deletions: 0 });
-    onFilesCountChange?.(0);
+    // Reset state only when issue changes, not on refresh/mode changes
+    if (prevIssueKeyRef.current !== issueKey) {
+      setFiles([]);
+      setTree([]);
+      setLineStats({ additions: 0, deletions: 0 });
+      onFilesCountChange?.(0);
+      prevIssueKeyRef.current = issueKey;
+    }
 
     if (!issueKey) {
       return;
@@ -6025,6 +6032,8 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
       if (!worktreeInfo) {
         setFiles([]);
         setTree([]);
+        setLineStats({ additions: 0, deletions: 0 });
+        onFilesCountChange?.(0);
         return;
       }
 
@@ -6260,13 +6269,17 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
     };
 
     fetchDiff(); // Initial fetch
-    const interval = setInterval(quickCheck, 1000); // Quick check every 1s
+
+    // Only start interval if worktree exists
+    const worktreeExists = !!getIssueWorktree(projectKey, issueKey);
+    const interval = worktreeExists ? setInterval(quickCheck, 1000) : null;
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [issueKey, baseBranch, diffMode]);
+  }, [issueKey, baseBranch, diffMode, refreshTrigger]);
 
   // Restore or initialize expanded paths when issue changes
   useEffect(() => {
@@ -6842,13 +6855,13 @@ function FileDiffViewer({ issueKey, file, onBack }: {
                   <span key={i}>
                     {row.children?.map((child, j) => {
                       if (child.type === 'text') {
-                        const text = child.value || '';
+                        const text = String(child.value || '');
                         return <span key={j}>{renderText(text, `${j}`)}</span>;
                       }
                       const style = useInlineStyles
                         ? child.properties?.style || (child.properties?.className?.reduce((acc: Record<string, string>, cls: string) => ({ ...acc, ...stylesheet[cls] }), {}) as React.CSSProperties)
                         : undefined;
-                      const content = child.children?.map((c: { value?: string }) => c.value).join('') || '';
+                      const content = child.children?.map((c: { value?: string | number }) => String(c.value ?? '')).join('') || '';
                       return <span key={j} style={style}>{renderText(content, `${j}`)}</span>;
                     })}
                   </span>
@@ -7790,9 +7803,31 @@ function ReviewRequestedPRs() {
 
 function MainApp({ onLogout }: { onLogout: () => void }) {
   const [sidebarWidth, setSidebarWidth] = useState(400);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => {
+    const saved = localStorage.getItem("left_sidebar_collapsed");
+    return saved !== null ? saved === "true" : false;
+  });
   const [rightSidebarWidth, setRightSidebarWidth] = useState(400);
-  const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(true);
+  const [rightSidebarCollapsed, setRightSidebarCollapsedState] = useState(() => {
+    const saved = localStorage.getItem("right_sidebar_collapsed");
+    return saved !== null ? saved === "true" : true;
+  });
+
+  const setSidebarCollapsed = (value: boolean | ((prev: boolean) => boolean)) => {
+    setSidebarCollapsedState(prev => {
+      const next = typeof value === "function" ? value(prev) : value;
+      localStorage.setItem("left_sidebar_collapsed", String(next));
+      return next;
+    });
+  };
+
+  const setRightSidebarCollapsed = (value: boolean | ((prev: boolean) => boolean)) => {
+    setRightSidebarCollapsedState(prev => {
+      const next = typeof value === "function" ? value(prev) : value;
+      localStorage.setItem("right_sidebar_collapsed", String(next));
+      return next;
+    });
+  };
   const [diffFilesCount, setDiffFilesCount] = useState(0);
   const [selectedDiffFile, setSelectedDiffFile] = useState<DiffFile | null>(() => {
     // Restore from per-issue storage if available
@@ -7802,8 +7837,30 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
   const [settingsProject, setSettingsProject] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [terminalCollapsed, setTerminalCollapsed] = useState(false);
-  const [terminalMaximized, setTerminalMaximized] = useState(false);
+  const [terminalCollapsed, setTerminalCollapsedState] = useState(() => {
+    const saved = localStorage.getItem("terminal_collapsed");
+    return saved !== null ? saved === "true" : false;
+  });
+  const [terminalMaximized, setTerminalMaximizedState] = useState(() => {
+    const saved = localStorage.getItem("terminal_maximized");
+    return saved !== null ? saved === "true" : false;
+  });
+
+  const setTerminalCollapsed = (value: boolean | ((prev: boolean) => boolean)) => {
+    setTerminalCollapsedState(prev => {
+      const next = typeof value === "function" ? value(prev) : value;
+      localStorage.setItem("terminal_collapsed", String(next));
+      return next;
+    });
+  };
+
+  const setTerminalMaximized = (value: boolean | ((prev: boolean) => boolean)) => {
+    setTerminalMaximizedState(prev => {
+      const next = typeof value === "function" ? value(prev) : value;
+      localStorage.setItem("terminal_maximized", String(next));
+      return next;
+    });
+  };
   const [hiddenProjects, setHiddenProjectsState] = useState<string[]>(getHiddenProjects());
   const [pinnedIssues, setPinnedIssuesState] = useState<string[]>(() => {
     const saved = localStorage.getItem(`${getStoragePrefix()}pinned_issues`);
@@ -8101,7 +8158,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
             ) : (
               <IssueDetailView issueKey={selectedIssue} onIssueClick={handleIssueClick} onCreateChild={handleCreateChild} onRefresh={() => setRefreshTrigger(n => n + 1)} refreshTrigger={issueRefreshTrigger} terminalCollapsed={terminalCollapsed} setTerminalCollapsed={setTerminalCollapsed} terminalMaximized={terminalMaximized} setTerminalMaximized={setTerminalMaximized} renderTerminal={false} />
             )}
-            <TerminalPanel issueKey={selectedIssue} projectKey={getProjectKeyFromIssueKey(selectedIssue)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />
+            <TerminalPanel issueKey={selectedIssue} projectKey={getProjectKeyFromIssueKey(selectedIssue)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} onWorktreeChange={() => setRefreshTrigger(n => n + 1)} />
           </div>
         ) : (
           <div className="empty-detail">
@@ -8132,6 +8189,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
               onFilesCountChange={setDiffFilesCount}
               onFileSelect={setSelectedDiffFile}
               selectedFile={selectedDiffFile?.path}
+              refreshTrigger={refreshTrigger}
             />
           </div>
         </div>
