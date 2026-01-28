@@ -204,11 +204,11 @@ html {
 }
 
 /* 아이콘 크기 클래스 */
-.icon-xs { width: var(--icon-size-xs); height: var(--icon-size-xs); }
-.icon-sm { width: var(--icon-size-sm); height: var(--icon-size-sm); }
-.icon-md { width: var(--icon-size-md); height: var(--icon-size-md); }
-.icon-lg { width: var(--icon-size-lg); height: var(--icon-size-lg); }
-.icon-xl { width: var(--icon-size-xl); height: var(--icon-size-xl); }
+.icon-xs { width: var(--icon-size-xs); height: var(--icon-size-xs); display: block; }
+.icon-sm { width: var(--icon-size-sm); height: var(--icon-size-sm); display: block; }
+.icon-md { width: var(--icon-size-md); height: var(--icon-size-md); display: block; }
+.icon-lg { width: var(--icon-size-lg); height: var(--icon-size-lg); display: block; }
+.icon-xl { width: var(--icon-size-xl); height: var(--icon-size-xl); display: block; }
 .icon-2xl { width: var(--icon-size-2xl); height: var(--icon-size-2xl); }
 .icon-3xl { width: var(--icon-size-3xl); height: var(--icon-size-3xl); }
 
@@ -1002,6 +1002,12 @@ html, body, #root {
 
 .hidden-toggle:hover {
   opacity: 1;
+}
+
+.hidden-toggle-placeholder {
+  display: inline-block;
+  height: 15px;
+  margin-right: 4px;
 }
 
 .hidden-panel {
@@ -1896,7 +1902,6 @@ html, body, #root {
   gap: 6px;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
-  margin-top: 4px;
 }
 
 .parent-label {
@@ -3117,6 +3122,107 @@ html, body, #root {
   cursor: not-allowed !important;
 }
 
+.terminal-repo-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer !important;
+}
+
+.terminal-repo-select-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.terminal-repo-display {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  height: auto;
+}
+
+.terminal-repo-path {
+  flex: 1;
+  font-size: var(--font-size-md);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-repo-clear-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer !important;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.terminal-repo-clear-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.terminal-repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.terminal-repo-list-label {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.terminal-repo-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--text);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer !important;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.terminal-repo-list-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.terminal-repo-list-item-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .terminal-worktree-setup {
   flex: 1;
   display: flex;
@@ -4005,6 +4111,14 @@ html, body, #root {
 .worktree-branch {
   color: var(--text-muted);
   font-family: var(--font-family-mono);
+}
+
+.worktree-repo {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
 }
 
 .chip.danger {

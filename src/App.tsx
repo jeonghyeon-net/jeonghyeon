@@ -217,19 +217,6 @@ function saveProjectFilter(projectKey: string, filter: ProjectFilter) {
   localStorage.setItem(`${getStoragePrefix()}filter_${projectKey}`, JSON.stringify(filter));
 }
 
-function getProjectRepoPath(projectKey: string): string {
-  return localStorage.getItem(`${getStoragePrefix()}repo_path_${projectKey}`) || "";
-}
-
-function saveProjectRepoPath(projectKey: string, path: string) {
-  const key = `${getStoragePrefix()}repo_path_${projectKey}`;
-  if (path) {
-    localStorage.setItem(key, path);
-  } else {
-    localStorage.removeItem(key);
-  }
-}
-
 function getProjectKeyFromIssueKey(issueKey: string): string {
   return issueKey.split("-")[0] || "";
 }
@@ -238,6 +225,7 @@ type WorktreeInfo = {
   path: string;
   branch: string;
   baseBranch?: string;
+  repoPath?: string;
 };
 
 function getIssueWorktree(projectKey: string, issueKey: string): WorktreeInfo | null {
@@ -823,20 +811,6 @@ const PlusIcon = () => (
   <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="12" y1="5" x2="12" y2="19" />
     <line x1="5" y1="12" x2="19" y2="12" />
-  </svg>
-);
-
-const ExternalTerminalIcon = () => (
-  <svg className="icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="1" y="2" width="22" height="20" rx="2" />
-    <path d="M5 9l3 3-3 3" />
-    <path d="M10 15h6" />
-  </svg>
-);
-
-const GitHubIcon = () => (
-  <svg className="icon-xs" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
   </svg>
 );
 
@@ -1585,16 +1559,6 @@ function ProjectTree({
               )}
             </div>
             <div className="tree-item-actions">
-              {getProjectRepoPath(project.key) && (
-                <button className="icon-btn" onClick={(e) => { e.stopPropagation(); invoke("open_terminal_at", { path: getProjectRepoPath(project.key) }); }} title="Open in Terminal">
-                  <ExternalTerminalIcon />
-                </button>
-              )}
-              {getProjectRepoPath(project.key) && (
-                <button className="icon-btn" onClick={(e) => { e.stopPropagation(); invoke("run_gh_command", { cwd: getProjectRepoPath(project.key), args: ["browse"] }); }} title="Open in GitHub">
-                  <GitHubIcon />
-                </button>
-              )}
               <button className="icon-btn" onClick={(e) => { e.stopPropagation(); onCreateClick(project.key); }} title="Create Issue">
                 <PlusIcon />
               </button>
@@ -1842,11 +1806,9 @@ function FilterSettings({ projectKey, onSave }: { projectKey: string; onSave: ()
   const [statuses, setStatuses] = useState<StatusInfo[]>([]);
   const [issueTypes, setIssueTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [repoPath, setRepoPath] = useState(() => getProjectRepoPath(projectKey));
 
   useEffect(() => {
     setLoading(true);
-    setRepoPath(getProjectRepoPath(projectKey));
     Promise.all([
       fetchProjectStatuses(projectKey),
       fetchProjectIssueTypes(projectKey),
@@ -1865,19 +1827,7 @@ function FilterSettings({ projectKey, onSave }: { projectKey: string; onSave: ()
 
   const handleSave = () => {
     saveProjectFilter(projectKey, filter);
-    saveProjectRepoPath(projectKey, repoPath);
     onSave();
-  };
-
-  const selectRepoFolder = async () => {
-    const selected = await openDialog({
-      directory: true,
-      multiple: false,
-      title: "Select Repository Folder",
-    });
-    if (selected) {
-      setRepoPath(selected as string);
-    }
   };
 
   const toggleArrayItem = (arr: string[], item: string) => {
@@ -1998,33 +1948,6 @@ function FilterSettings({ projectKey, onSave }: { projectKey: string; onSave: ()
               onChange={(e) => setFilter({ ...filter, jqlExtra: e.target.value })}
               placeholder='e.g. labels = "urgent"'
             />
-          </div>
-        </div>
-
-        <div className="filter-section">
-          <div className="filter-section-title">REPOSITORY</div>
-          <div className="input-group">
-            <label>Repository Path</label>
-            <div className="repo-path-input">
-              <input
-                type="text"
-                value={repoPath}
-                placeholder="Click to select repository folder"
-                readOnly
-                onClick={selectRepoFolder}
-              />
-              {repoPath && (
-                <button
-                  type="button"
-                  className="repo-path-clear"
-                  onClick={(e) => { e.stopPropagation(); setRepoPath(""); }}
-                >
-                  <svg className="icon-sm" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M2.5 2.5l7 7M9.5 2.5l-7 7" />
-                  </svg>
-                </button>
-              )}
-            </div>
           </div>
         </div>
 
@@ -2346,15 +2269,11 @@ function GlobalSettings({ onLogout, deletingWorktreeKeys, setDeletingWorktreeKey
         seenPaths.add(wt.info.path);
       }
 
-      // 2. Get all unique repo paths from project settings (for current connection)
-      const prefix = getStoragePrefix();
-      const repoPathPrefix = `${prefix}repo_path_`;
+      // 2. Get all unique repo paths from worktree info (for current connection)
       const repoPaths = new Set<string>();
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(repoPathPrefix)) {
-          const path = localStorage.getItem(key);
-          if (path) repoPaths.add(path);
+      for (const wt of localWorktrees) {
+        if (wt.info.repoPath) {
+          repoPaths.add(wt.info.repoPath);
         }
       }
 
@@ -2411,8 +2330,8 @@ function GlobalSettings({ onLogout, deletingWorktreeKeys, setDeletingWorktreeKey
   }, []);
 
   const deleteWorktreeEntry = async (wt: WorktreeEntry) => {
-    // Get repo path from project settings or from orphaned worktree
-    const repoPath = wt.repoPath || (wt.projectKey ? getProjectRepoPath(wt.projectKey) : null);
+    // Get repo path from worktree info or from orphaned worktree
+    const repoPath = wt.repoPath || wt.info.repoPath || null;
 
     // 1. Try git worktree prune first (cleans up references to missing folders)
     if (repoPath) {
@@ -2996,6 +2915,11 @@ function GlobalSettings({ onLogout, deletingWorktreeKeys, setDeletingWorktreeKey
                             <span className="worktree-issue">{wt.issueKey}</span>
                           )}
                           <span className="worktree-branch">{wt.info.branch}</span>
+                          {(wt.info.repoPath || wt.repoPath) && (
+                            <span className="worktree-repo" title={wt.info.repoPath || wt.repoPath}>
+                              {(wt.info.repoPath || wt.repoPath)?.split("/").pop()}
+                            </span>
+                          )}
                         </div>
                         <button
                           className="icon-btn-sm"
@@ -3823,8 +3747,11 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
 
   // Load state from global store
   const savedState = getIssueTerminalState(issueKey);
-  const [repoPath, setRepoPath] = useState(() => getProjectRepoPath(projectKey) || null);
   const [worktreeInfo, setWorktreeInfo] = useState<WorktreeInfo | null>(() => getIssueWorktree(projectKey, issueKey));
+  const [repoPath, setRepoPath] = useState<string | null>(() => {
+    const wt = getIssueWorktree(projectKey, issueKey);
+    return wt?.repoPath || null;
+  });
   const [groups, setGroupsState] = useState<TerminalGroup[]>(savedState.groups);
   const [activeGroupId, setActiveGroupIdState] = useState<number | null>(savedState.activeGroupId);
   const [nextGroupId, setNextGroupIdState] = useState(savedState.nextGroupId);
@@ -3842,6 +3769,19 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   const [worktreeError, setWorktreeError] = useState<string | null>(null);
   const [branchMode, setBranchMode] = useState<"new" | "existing">("new");
   const [selectedExistingBranch, setSelectedExistingBranch] = useState("");
+
+  // Get project's used repo paths
+  const getProjectRepoPaths = (): string[] => {
+    const allWorktrees = getAllWorktrees();
+    const repoPaths = new Set<string>();
+    for (const wt of allWorktrees) {
+      if (wt.projectKey === projectKey && wt.info.repoPath) {
+        repoPaths.add(wt.info.repoPath);
+      }
+    }
+    return Array.from(repoPaths);
+  };
+  const [projectRepoPaths, setProjectRepoPaths] = useState<string[]>(() => getProjectRepoPaths());
 
   // Branch name validation
   const isValidBranchName = (name: string): boolean => {
@@ -3881,7 +3821,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
     });
     if (selected) {
       const path = selected as string;
-      saveProjectRepoPath(projectKey, path);
       setRepoPath(path);
     }
   };
@@ -3961,7 +3900,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
 
       if (exists) {
         // Path exists, just use it (no setup.sh for existing worktrees)
-        const info = { path: worktreePath, branch: targetBranch, baseBranch: branchMode === "new" ? baseBranch : defaultBaseBranch };
+        const info = { path: worktreePath, branch: targetBranch, baseBranch: branchMode === "new" ? baseBranch : defaultBaseBranch, repoPath };
         saveIssueWorktree(projectKey, capturedIssueKey, info);
         setIssueTerminalState(capturedIssueKey, { isCreating: false });
         if (issueKeyRef.current === capturedIssueKey) {
@@ -3995,7 +3934,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
         // Check if this request is still valid
         if (createRequestIds.get(capturedIssueKey) !== requestId) return;
 
-        const info = { path: worktreePath, branch: targetBranch, baseBranch };
+        const info = { path: worktreePath, branch: targetBranch, baseBranch, repoPath };
         saveIssueWorktree(projectKey, capturedIssueKey, info);
 
         // Create terminal and run setup.sh immediately (even if on different issue)
@@ -4019,6 +3958,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           setGroupsState([newGroup]);
           setActiveGroupIdState(1);
           setNextGroupIdState(2);
+          setProjectRepoPaths(getProjectRepoPaths());
         }
         onWorktreeChange?.();
       } else {
@@ -4031,7 +3971,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
         // Check if this request is still valid
         if (createRequestIds.get(capturedIssueKey) !== requestId) return;
 
-        const info = { path: worktreePath, branch: targetBranch, baseBranch: defaultBaseBranch };
+        const info = { path: worktreePath, branch: targetBranch, baseBranch: defaultBaseBranch, repoPath };
         saveIssueWorktree(projectKey, capturedIssueKey, info);
 
         // Create terminal and run setup.sh immediately (even if on different issue)
@@ -4055,6 +3995,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           setGroupsState([newGroup]);
           setActiveGroupIdState(1);
           setNextGroupIdState(2);
+          setProjectRepoPaths(getProjectRepoPaths());
         }
         onWorktreeChange?.();
       }
@@ -4146,6 +4087,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           setGroupsState([]);
           setActiveGroupIdState(null);
           setNextGroupIdState(1);
+          setProjectRepoPaths(getProjectRepoPaths());
           setShowWorktreePopover(false);
           setConfirmDelete(false);
           setBranchMode("new");
@@ -4188,10 +4130,11 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
     setActiveGroupIdState(state.activeGroupId);
     setNextGroupIdState(state.nextGroupId);
     setTerminalHeightState(state.terminalHeight);
-    setRepoPath(getProjectRepoPath(projectKey) || null);
     // If creating/deleting, show null worktreeInfo to display indicator
     const isInProgress = state.isDeleting || state.isCreating;
-    setWorktreeInfo(isInProgress ? null : getIssueWorktree(projectKey, issueKey));
+    const wt = getIssueWorktree(projectKey, issueKey);
+    setWorktreeInfo(isInProgress ? null : wt);
+    setRepoPath(wt?.repoPath || null);
     setWorktreeError(null);
     setIsCreatingWorktree(state.isCreating || false);
     setIsDeletingWorktree(state.isDeleting || false);
@@ -4203,6 +4146,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
     setPrIsDraft(false);
     setPrState(null);
     setPrNumber(null);
+    setProjectRepoPaths(getProjectRepoPaths());
   }, [issueKey, projectKey]);
 
   // Check for open PR when worktree is set
@@ -4555,42 +4499,6 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [terminalPath, activeGroupId, groups]);
 
-  // Show connect repository UI if no repo path is set
-  if (!repoPath) {
-    return (
-      <div className={`terminal-panel ${isMaximized && !isCollapsed ? "maximized" : ""}`} style={{ height: isCollapsed ? 32 : isMaximized ? "100%" : terminalHeight }}>
-        {!isCollapsed && !isMaximized && <div className="terminal-resize-handle" onPointerDown={handleResizeStart} />}
-        <div className="terminal-header">
-          <span className="terminal-header-title">TERMINAL</span>
-          <div className="terminal-header-actions">
-            <button className="terminal-header-btn" onClick={() => { if (isCollapsed) { setIsCollapsed(false); setIsMaximized(true); } else { setIsMaximized(!isMaximized); } }} title={isMaximized && !isCollapsed ? "Restore" : "Maximize"}>
-              {isMaximized && !isCollapsed ? <MinimizeIcon /> : <MaximizeIcon />}
-            </button>
-            <button className="terminal-header-btn" onClick={() => setIsCollapsed(!isCollapsed)}>
-              <ChevronIcon open={!isCollapsed} />
-            </button>
-          </div>
-        </div>
-        {!isCollapsed && (
-          <div className="terminal-connect-repo">
-            <div className="terminal-connect-icon">
-              <svg className="icon-3xl" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
-            </div>
-            <div className="terminal-connect-text">
-              <div className="terminal-connect-title">Connect Repository</div>
-              <div className="terminal-connect-desc">Select the local repository folder for this project to enable the terminal.</div>
-            </div>
-            <button className="terminal-connect-btn" onClick={selectRepository}>
-              Select Folder
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   // Show worktree setup UI if no worktree exists
   if (!worktreeInfo) {
     return (
@@ -4619,6 +4527,47 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                 <div className="terminal-worktree-spinner" />
                 <div className="terminal-worktree-loading-text">Setting up worktree...</div>
               </div>
+            ) : !repoPath ? (
+              <>
+                <div className="terminal-connect-icon">
+                  <svg className="icon-3xl" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                </div>
+                <div className="terminal-connect-text">
+                  <div className="terminal-connect-title">Setup Worktree</div>
+                  <div className="terminal-connect-desc">Select repository folder and create an isolated worktree for this issue</div>
+                </div>
+                <div className="terminal-worktree-form">
+                  <div className="terminal-worktree-field">
+                    <label>Repository Folder</label>
+                    <button className="terminal-repo-select-btn" onClick={selectRepository}>
+                      <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                      </svg>
+                      Select Folder
+                    </button>
+                    {projectRepoPaths.length > 0 && (
+                      <div className="terminal-repo-list">
+                        <div className="terminal-repo-list-label">Recently used</div>
+                        {projectRepoPaths.map((path) => (
+                          <button
+                            key={path}
+                            className="terminal-repo-list-item"
+                            onClick={() => setRepoPath(path)}
+                            title={path}
+                          >
+                            <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                            <span className="terminal-repo-list-item-path">{path.split("/").pop() || path}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
             ) : branches.length === 0 ? (
               <div className="terminal-worktree-loading">
                 <div className="terminal-worktree-spinner" />
@@ -4639,6 +4588,17 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                   <div className="terminal-connect-desc">Create an isolated worktree for this issue</div>
                 </div>
                 <div className="terminal-worktree-form">
+                  <div className="terminal-worktree-field">
+                    <label>Repository</label>
+                    <div className="terminal-repo-display">
+                      <span className="terminal-repo-path">{repoPath}</span>
+                      <button className="terminal-repo-clear-btn" onClick={() => { setRepoPath(null); setBranches([]); }} title="Clear repository">
+                        <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
                   {branchMode === "new" && (
                     <div className="terminal-worktree-field">
                       <label>Base Branch</label>
@@ -5206,6 +5166,15 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
               <span className="edit-icon"><EditIcon /></span>
             </div>
           )}
+          {issue.parentKey && (
+            <div className="issue-parent">
+              <span className="parent-label">Parent:</span>
+              <span className="parent-link" onClick={() => onIssueClick(issue.parentKey!)}>
+                {issue.parentKey}
+              </span>
+              {issue.parentSummary && <span className="parent-summary">{issue.parentSummary}</span>}
+            </div>
+          )}
           <button
             className="create-child-btn"
             onClick={() => onCreateChild(issue.projectKey, issue.key)}
@@ -5213,16 +5182,6 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
             + Child
           </button>
         </div>
-
-        {issue.parentKey && (
-          <div className="issue-parent">
-            <span className="parent-label">Parent:</span>
-            <span className="parent-link" onClick={() => onIssueClick(issue.parentKey!)}>
-              {issue.parentKey}
-            </span>
-            {issue.parentSummary && <span className="parent-summary">{issue.parentSummary}</span>}
-          </div>
-        )}
 
         {editing === "summary" ? (
           <div className="edit-inline">
@@ -6025,7 +5984,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
 
     const projectKey = getProjectKeyFromIssueKey(issueKey);
     const worktreeInfo = getIssueWorktree(projectKey, issueKey);
-    const projectRepoPath = getProjectRepoPath(projectKey);
+    const issueRepoPath = worktreeInfo?.repoPath;
 
     if (!worktreeInfo) {
       setBaseBranch("");
@@ -6034,14 +5993,14 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
     }
 
     // Fetch branches from main repo and detect default branch
-    if (projectRepoPath) {
+    if (issueRepoPath) {
       Promise.all([
         invoke<string>("run_git_command", {
-          cwd: projectRepoPath,
+          cwd: issueRepoPath,
           args: ["branch"],
         }).catch(() => ""),
         invoke<string>("run_git_command", {
-          cwd: projectRepoPath,
+          cwd: issueRepoPath,
           args: ["rev-parse", "--abbrev-ref", "HEAD"],
         }).catch(() => ""),
       ]).then(([branchOutput, currentBranch]) => {
@@ -8345,7 +8304,7 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
           </div>
           <div className="sidebar-header">
             <span>Projects</span>
-            {hiddenProjects.length > 0 && (
+            {hiddenProjects.length > 0 ? (
               <button
                 className="hidden-toggle"
                 onClick={() => setShowHiddenPanel(!showHiddenPanel)}
@@ -8353,6 +8312,8 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
               >
                 {hiddenProjects.length} hidden
               </button>
+            ) : (
+              <span className="hidden-toggle-placeholder"></span>
             )}
           </div>
           {showHiddenPanel && hiddenProjects.length > 0 && (
