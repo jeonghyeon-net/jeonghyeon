@@ -1700,34 +1700,19 @@ html, body, #root {
   50% { opacity: 0.4; }
 }
 
-.skeleton-header {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
 .skeleton-badge {
   width: 56px;
-  height: 18px;
+  height: 22px;
 }
 
 .skeleton-title {
   width: 65%;
-  height: 20px;
-  margin-bottom: 18px;
-}
-
-.skeleton-meta {
-  display: flex;
-  gap: 20px;
-  padding: 14px 0;
-  border-top: 1px solid var(--border);
-  margin-bottom: 18px;
+  height: 22px;
 }
 
 .skeleton-meta-item {
   width: 70px;
-  height: 28px;
+  height: 32px;
 }
 
 .skeleton-line {
@@ -1780,6 +1765,10 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.issue-header:has(.skeleton) {
+  margin-bottom: 4px;
 }
 
 .issue-key-badge {

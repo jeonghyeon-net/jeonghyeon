@@ -5081,12 +5081,16 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   if (loading) {
     const content = (
       <div className="issue-detail scrollable">
-        <div className="skeleton-header">
-          <div className="skeleton skeleton-badge" />
-          <div className="skeleton skeleton-badge" />
+        <div className="issue-detail-header">
+          <div className="issue-header">
+            <div className="skeleton skeleton-badge" />
+            <div className="skeleton skeleton-badge" />
+          </div>
+          <div className="issue-title-row">
+            <div className="skeleton skeleton-title" />
+          </div>
         </div>
-        <div className="skeleton skeleton-title" />
-        <div className="skeleton-meta">
+        <div className="issue-meta">
           <div className="skeleton skeleton-meta-item" />
           <div className="skeleton skeleton-meta-item" />
           <div className="skeleton skeleton-meta-item" />
