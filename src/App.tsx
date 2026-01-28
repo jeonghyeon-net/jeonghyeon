@@ -5095,11 +5095,19 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           <div className="skeleton skeleton-meta-item" />
           <div className="skeleton skeleton-meta-item" />
           <div className="skeleton skeleton-meta-item" />
+          <div className="skeleton skeleton-meta-item" />
+          <div className="skeleton skeleton-meta-item wide" />
         </div>
-        <div className="skeleton skeleton-line" />
-        <div className="skeleton skeleton-line short" />
-        <div className="skeleton skeleton-line" />
-        <div className="skeleton skeleton-line shorter" />
+        <div className="issue-description">
+          <div className="skeleton skeleton-label" />
+          <div className="skeleton skeleton-line" />
+          <div className="skeleton skeleton-line short" />
+          <div className="skeleton skeleton-line" />
+          <div className="skeleton skeleton-line shorter" />
+        </div>
+        <div className="issue-comments">
+          <div className="skeleton skeleton-label" />
+        </div>
       </div>
     );
     if (!renderTerminal) return content;
