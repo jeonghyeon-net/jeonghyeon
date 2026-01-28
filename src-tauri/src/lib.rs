@@ -392,6 +392,26 @@ async fn check_path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
+async fn filter_real_files(base_path: String, paths: Vec<String>) -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let base = Path::new(&base_path);
+        paths
+            .into_iter()
+            .filter(|p| {
+                let full_path = base.join(p);
+                // Check if it's a regular file (not symlink, not directory)
+                match std::fs::symlink_metadata(&full_path) {
+                    Ok(meta) => meta.is_file() && !meta.file_type().is_symlink(),
+                    Err(_) => false,
+                }
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[tauri::command]
 async fn run_git_command(cwd: String, args: Vec<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let path_env = std::env::var("PATH").unwrap_or_default();
@@ -565,6 +585,19 @@ async fn open_terminal_at(path: String) -> Result<(), String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+#[tauri::command]
+async fn open_in_zed(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Command::new("open")
+            .args(["-a", "Zed", &path])
+            .output()
+            .map_err(|e| format!("Failed to open in Zed: {}", e))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[derive(serde::Serialize)]
 struct SystemStats {
     cpu_usage: f32,
@@ -672,6 +705,7 @@ pub fn run() {
             close_pty_session,
             get_pty_foreground_process,
             check_path_exists,
+            filter_real_files,
             run_git_command,
             run_gh_command,
             get_home_dir,
@@ -683,6 +717,7 @@ pub fn run() {
             delete_file,
             delete_directory,
             open_terminal_at,
+            open_in_zed,
             get_system_stats,
             open_activity_monitor
         ])

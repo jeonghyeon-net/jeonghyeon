@@ -6,6 +6,7 @@
   -webkit-user-select: none;
   -webkit-user-drag: none;
   cursor: default;
+  overscroll-behavior: none;
 }
 
 /* macOS Titlebar */
@@ -160,6 +161,7 @@ html {
   --sidebar-width: 400px;
   --sidebar-header-font-size: var(--font-size-sm);
   --sidebar-item-height: 26px;
+  --diff-tree-item-height: 22px;
   --sidebar-item-font-size: var(--font-size-md);
   --sidebar-item-padding: 0 6px;
   --sidebar-icon-size: 14px;
@@ -228,6 +230,17 @@ html, body, #root {
   color: var(--text);
 }
 
+.app.resizing,
+.app.resizing *,
+.app.resizing .diff-line,
+.app.resizing .diff-line *,
+.app.resizing .description-content,
+.app.resizing .description-content * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: col-resize !important;
+}
+
 /* Scrollbar - Hidden */
 * {
   scrollbar-width: none;
@@ -244,10 +257,20 @@ html, body, #root {
 
 .sidebar {
   height: 100%;
-  padding-top: 20px;
+  padding-top: 0;
   background: var(--bg-primary);
-  border-right: 1px solid var(--border);
   flex-shrink: 0;
+  position: relative;
+}
+
+.sidebar-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 2px 2px 8px;
+  position: sticky;
+  top: 0;
+  background: var(--bg-primary);
+  z-index: 2;
 }
 
 .sidebar-toggle {
@@ -270,6 +293,7 @@ html, body, #root {
   width: var(--icon-size-md);
   height: var(--icon-size-md);
 }
+
 
 .sidebar-expand {
   background: none;
@@ -294,10 +318,6 @@ html, body, #root {
   padding: 28px 4px 8px 2px;
 }
 
-.sidebar-expand-right svg,
-.right-sidebar .sidebar-toggle svg {
-  transform: scaleX(-1);
-}
 
 .right-sidebar {
   display: flex;
@@ -314,13 +334,15 @@ html, body, #root {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding-top: 20px;
+  padding-top: 0;
   overflow: hidden;
 }
 
 .right-sidebar .sidebar-header {
   justify-content: space-between;
-  padding: 10px 8px 6px 2px;
+  padding: 10px 8px 2px 2px;
+  border-bottom: none;
+  top: 0;
 }
 
 .diff-stat-add {
@@ -350,14 +372,14 @@ html, body, #root {
 }
 
 .diff-tree-header {
-  padding: var(--sidebar-item-padding);
-  height: var(--sidebar-item-height);
+  padding: 4px 6px 4px 6px;
   font-size: var(--sidebar-item-font-size);
   color: var(--text-muted);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+  border-bottom: 1px solid var(--border);
 }
 
 .diff-tree-mode-toggle {
@@ -438,7 +460,10 @@ html, body, #root {
 }
 
 .diff-tree-empty {
-  padding: var(--sidebar-item-padding);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
   color: var(--text-muted);
   font-size: var(--sidebar-item-font-size);
   opacity: 0.5;
@@ -462,17 +487,28 @@ html, body, #root {
 .diff-tree-item {
   display: flex;
   align-items: center;
-  height: 22px;
+  height: var(--diff-tree-item-height);
   padding: 0 8px;
+  padding-left: calc(8px + var(--depth, 0) * 12px);
   font-size: var(--sidebar-item-font-size);
   gap: 3px;
   color: var(--text-muted);
+}
+
+.diff-tree-item.diff-tree-flat {
+  padding-left: 8px;
+}
+
+.diff-tree-children {
+  margin-left: calc(8px + var(--depth, 0) * 12px + 6px);
+  border-left: 1px solid var(--border);
 }
 
 .diff-tree-item:hover {
   background: var(--bg-hover);
   color: var(--text);
 }
+
 
 .diff-tree-dir {
   color: var(--text-muted);
@@ -498,13 +534,17 @@ html, body, #root {
   opacity: 0.7;
 }
 
-.diff-tree-status {
+.diff-tree-status,
+.diff-tree-status-slot {
   font-size: 9px;
   font-weight: 600;
   width: 12px;
   text-align: center;
   flex-shrink: 0;
   opacity: 0.8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .diff-tree-name {
@@ -514,23 +554,423 @@ html, body, #root {
   white-space: nowrap;
 }
 
-.diff-tree-file {
-  padding-left: 12px;
-}
-
 .diff-tree-file .diff-tree-name {
   margin-left: 4px;
+}
+
+.diff-tree-file.selected {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+/* File Diff Viewer - IDE Style */
+.file-diff-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-diff-back-row {
+  display: flex;
+  padding: 0 6px 2px 6px;
+}
+
+.file-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px 3px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-diff-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.file-diff-back:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  opacity: 1;
+}
+
+.file-diff-back svg {
+  width: 12px;
+  height: 12px;
+}
+
+.file-diff-status {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 0;
+  border-radius: 2px;
+  background: var(--bg-tertiary);
+  min-width: 16px;
+  text-align: center;
+}
+
+.file-diff-path-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  margin-right: auto;
+}
+
+.file-diff-path-wrapper:hover .file-diff-path {
+  color: var(--text);
+  opacity: 1;
+}
+
+.file-diff-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-family-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.file-diff-path-wrapper .copy-icon,
+.file-diff-path-wrapper .check-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0;
+}
+
+.file-diff-path-wrapper:hover .copy-icon {
+  opacity: 0.5;
+}
+
+.file-diff-path-wrapper .check-icon {
+  display: none;
+}
+
+.file-diff-path-wrapper.copied .copy-icon {
+  display: none;
+}
+
+.file-diff-path-wrapper.copied .check-icon {
+  display: block;
+  color: var(--status-added);
+  opacity: 1;
+}
+
+.file-diff-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.file-diff-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.file-diff-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+  opacity: 1;
+}
+
+.file-diff-action:disabled {
+  cursor: not-allowed;
+}
+
+.file-diff-content {
+  flex: 1;
+  overflow: auto;
+  contain: strict;
+  will-change: scroll-position;
+}
+
+.file-diff-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.file-diff-content::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.file-diff-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.diff-mode-change-banner {
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--text-muted) 6%, transparent);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  opacity: 0.8;
+}
+
+.diff-hunks {
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+  line-height: 20px;
+  min-width: max-content;
+}
+
+.diff-group-collapse {
+  position: relative;
+  background: color-mix(in srgb, var(--text-muted) 5%, var(--bg-primary));
+}
+
+.diff-group-collapse::before {
+  content: '';
+  position: absolute;
+  left: 40px;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 12%, transparent);
+  border-left: none;
+  pointer-events: none;
+}
+
+.diff-group-collapse .diff-line-context {
+  background: transparent;
+}
+
+.diff-group-collapse .diff-line .diff-line-num {
+  background: color-mix(in srgb, var(--text-muted) 5%, var(--bg-primary));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-muted) 18%, transparent);
+  border-right-color: color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.diff-group-collapse .diff-hunk-separator + .diff-line .diff-line-num {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-muted) 18%, transparent);
+}
+
+.diff-group-collapse .diff-line:last-child .diff-line-num {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-muted) 18%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.diff-group-collapse .diff-hunk-separator + .diff-line:last-child .diff-line-num {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-muted) 18%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.diff-hunk-separator {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  line-height: 20px;
+  cursor: pointer !important;
+  color: var(--text-muted);
+  font-size: 11px;
+  background: color-mix(in srgb, var(--text-muted) 5%, var(--bg-primary));
+}
+
+.diff-hunk-separator * {
+  cursor: pointer !important;
+}
+
+.diff-hunk-separator-gutter {
+  position: sticky;
+  left: 0;
+  width: 40px;
+  padding: 0 8px;
+  text-align: right;
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--text-muted) 5%, var(--bg-primary));
+  border-right: 1px solid color-mix(in srgb, var(--text-muted) 12%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-muted) 18%, transparent), inset 0 1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent);
+  z-index: 1;
+}
+
+.diff-hunk-separator:has(~ .diff-line) .diff-hunk-separator-gutter {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--text-muted) 18%, transparent), inset 0 1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.diff-hunk-separator-text {
+  position: sticky;
+  left: 40px;
+  padding-left: 8px;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--text-muted) 5%, var(--bg-primary));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent);
+  z-index: 1;
+}
+
+.diff-hunk-separator:has(~ .diff-line) .diff-hunk-separator-text {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.diff-line {
+  display: flex;
+  min-height: 20px;
+  line-height: 20px;
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.diff-line-num {
+  position: sticky;
+  left: 0;
+  width: 40px;
+  padding: 0 8px;
+  text-align: right;
+  color: color-mix(in srgb, var(--text-muted) 70%, transparent);
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  flex-shrink: 0;
+  font-size: 11px;
+  background: var(--bg-secondary);
+  z-index: 1;
+  border-right: 1px solid var(--border);
+}
+
+
+.diff-line-code {
+  white-space: pre;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.whitespace-space,
+.whitespace-tab {
+  position: relative;
+  color: transparent;
+}
+
+.whitespace-space::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: var(--text-muted);
+  opacity: 0.3;
+}
+
+.whitespace-tab::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: var(--text-muted);
+  opacity: 0.3;
+}
+
+.diff-line *:not(.diff-line-num) {
+  background: transparent;
+  background-color: transparent;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text !important;
+}
+
+.diff-line *::selection {
+  background: Highlight !important;
+  background-color: Highlight !important;
+  color: HighlightText !important;
+}
+
+/* Context lines */
+.diff-line-context {
+  background: var(--bg-primary);
+}
+
+.diff-line-context .diff-line-num {
+  background: var(--bg-primary);
+}
+
+/* Added group */
+.diff-group-add {
+  background: color-mix(in srgb, var(--status-added) 5%, var(--bg-primary));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-added) 30%, transparent);
+}
+
+.diff-line-add .diff-line-num {
+  color: var(--status-added);
+  background: color-mix(in srgb, var(--status-added) 5%, var(--bg-primary));
+  box-shadow: inset 3px 0 0 var(--status-added);
+  border-right-color: color-mix(in srgb, var(--status-added) 30%, transparent);
+}
+
+.diff-group-add .diff-line:first-child {
+  border-top: 1px solid color-mix(in srgb, var(--status-added) 30%, transparent);
+}
+
+.diff-group-add .diff-line:last-child {
+  border-bottom: 1px solid color-mix(in srgb, var(--status-added) 30%, transparent);
+}
+
+/* Deleted group */
+.diff-group-del {
+  background: color-mix(in srgb, var(--status-deleted) 5%, var(--bg-primary));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--status-deleted) 30%, transparent);
+}
+
+.diff-line-del .diff-line-num {
+  color: var(--status-deleted);
+  background: color-mix(in srgb, var(--status-deleted) 5%, var(--bg-primary));
+  box-shadow: inset 3px 0 0 var(--status-deleted);
+  border-right-color: color-mix(in srgb, var(--status-deleted) 30%, transparent);
+}
+
+.diff-group-del .diff-line:first-child {
+  border-top: 1px solid color-mix(in srgb, var(--status-deleted) 30%, transparent);
+}
+
+.diff-group-del .diff-line:last-child {
+  border-bottom: 1px solid color-mix(in srgb, var(--status-deleted) 30%, transparent);
+}
+
+
+.diff-line-header {
+  display: none;
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 2px 6px 8px;
+  padding: 4px 2px 10px 8px;
   font-size: var(--sidebar-header-font-size);
   font-weight: 500;
   color: var(--text-muted);
   letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 30px;
+  background: var(--bg-primary);
+  z-index: 1;
 }
 
 .hidden-toggle {
@@ -790,7 +1230,7 @@ html, body, #root {
   flex: 1;
   min-width: 0;
   height: 100%;
-  padding-top: 20px;
+  padding-top: 10px;
   background: var(--bg-primary);
   display: flex;
   flex-direction: column;
@@ -1130,7 +1570,8 @@ html, body, #root {
   gap: 4px;
 }
 
-.input-group + .chip-group {
+.input-group + .chip-group,
+.shortcut-list + .chip-group {
   margin-top: 8px;
 }
 
@@ -3439,7 +3880,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .shortcut-label {
@@ -3533,6 +3974,7 @@ html, body, #root {
 
 .worktree-item.orphaned {
   border-left: 2px solid var(--warning);
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
 }
 
 

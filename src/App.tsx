@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, Fragment } from "react";
+import React, { useState, useCallback, useEffect, useRef, Fragment, useMemo } from "react";
 import { fetch } from "@tauri-apps/plugin-http";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { invoke } from "@tauri-apps/api/core";
@@ -331,7 +331,7 @@ const SHORTCUT_LABELS: Record<ShortcutKey, string> = {
   newTerminalGroup: "New Terminal Group",
   prevTerminalTab: "Previous Terminal Tab",
   nextTerminalTab: "Next Terminal Tab",
-  closeTerminalTab: "Close Terminal Tab",
+  closeTerminalTab: "Close",
 };
 
 // === Pomodoro Timer ===
@@ -4494,11 +4494,16 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           }));
         }
       } else if (matchesShortcut(e, shortcuts.closeTerminalTab)) {
+        // Always prevent default to avoid closing the window
         e.preventDefault();
-        if (activeGroupId !== null) {
-          const group = groups.find(g => g.id === activeGroupId);
-          if (group?.activeTerminal != null) {
-            closeTerminal(activeGroupId, group.activeTerminal);
+        // Only close terminal if focus is within terminal panel
+        const terminalPanel = document.querySelector('.terminal-panel');
+        if (terminalPanel?.contains(document.activeElement) || document.activeElement?.closest('.terminal-panel')) {
+          if (activeGroupId !== null) {
+            const group = groups.find(g => g.id === activeGroupId);
+            if (group?.activeTerminal != null) {
+              closeTerminal(activeGroupId, group.activeTerminal);
+            }
           }
         }
       }
@@ -4821,7 +4826,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   );
 }
 
-function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, refreshTrigger, terminalCollapsed, setTerminalCollapsed, terminalMaximized, setTerminalMaximized }: { issueKey: string; onIssueClick: (key: string) => void; onCreateChild: (projectKey: string, parentKey: string) => void; onRefresh: () => void; refreshTrigger: number; terminalCollapsed: boolean; setTerminalCollapsed: (v: boolean) => void; terminalMaximized: boolean; setTerminalMaximized: (v: boolean) => void }) {
+function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, refreshTrigger, terminalCollapsed, setTerminalCollapsed, terminalMaximized, setTerminalMaximized, renderTerminal = true }: { issueKey: string; onIssueClick: (key: string) => void; onCreateChild: (projectKey: string, parentKey: string) => void; onRefresh: () => void; refreshTrigger: number; terminalCollapsed: boolean; setTerminalCollapsed: (v: boolean) => void; terminalMaximized: boolean; setTerminalMaximized: (v: boolean) => void; renderTerminal?: boolean }) {
   const [showTerminal, _setShowTerminal] = useState(true);
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -5031,36 +5036,44 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   };
 
   if (loading) {
+    const content = (
+      <div className="issue-detail scrollable">
+        <div className="skeleton-header">
+          <div className="skeleton skeleton-badge" />
+          <div className="skeleton skeleton-badge" />
+        </div>
+        <div className="skeleton skeleton-title" />
+        <div className="skeleton-meta">
+          <div className="skeleton skeleton-meta-item" />
+          <div className="skeleton skeleton-meta-item" />
+          <div className="skeleton skeleton-meta-item" />
+          <div className="skeleton skeleton-meta-item" />
+        </div>
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line short" />
+        <div className="skeleton skeleton-line" />
+        <div className="skeleton skeleton-line shorter" />
+      </div>
+    );
+    if (!renderTerminal) return content;
     return (
       <div className="issue-detail-container">
-        <div className="issue-detail scrollable">
-          <div className="skeleton-header">
-            <div className="skeleton skeleton-badge" />
-            <div className="skeleton skeleton-badge" />
-          </div>
-          <div className="skeleton skeleton-title" />
-          <div className="skeleton-meta">
-            <div className="skeleton skeleton-meta-item" />
-            <div className="skeleton skeleton-meta-item" />
-            <div className="skeleton skeleton-meta-item" />
-            <div className="skeleton skeleton-meta-item" />
-          </div>
-          <div className="skeleton skeleton-line" />
-          <div className="skeleton skeleton-line short" />
-          <div className="skeleton skeleton-line" />
-          <div className="skeleton skeleton-line shorter" />
-        </div>
+        {content}
         {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} onWorktreeChange={onRefresh} />}
       </div>
     );
   }
 
   if (error || !issue) {
+    const content = (
+      <div className="issue-detail scrollable">
+        <div className="issue-error">Failed to load issue</div>
+      </div>
+    );
+    if (!renderTerminal) return content;
     return (
       <div className="issue-detail-container">
-        <div className="issue-detail scrollable">
-          <div className="issue-error">Failed to load issue</div>
-        </div>
+        {content}
         {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} onWorktreeChange={onRefresh} />}
       </div>
     );
@@ -5107,9 +5120,8 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   const timeExceeded = estimateSeconds > 0 ? totalSeconds > estimateSeconds : totalSeconds > 0;
   const excessMinutes = timeExceeded ? Math.floor((totalSeconds - estimateSeconds) / 60) : 0;
 
-  return (
-    <div className="issue-detail-container">
-      <div className="issue-detail scrollable">
+  const issueContent = (
+    <div className="issue-detail scrollable">
         <div className="issue-header">
           <div
             className="issue-key-badge clickable"
@@ -5837,7 +5849,14 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           )}
         </div>
       </div>
-      </div>
+    </div>
+  );
+
+  if (!renderTerminal) return issueContent;
+
+  return (
+    <div className="issue-detail-container">
+      {issueContent}
       {showTerminal && <TerminalPanel key={issueKey} issueKey={issueKey} projectKey={getProjectKeyFromIssueKey(issueKey)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} onWorktreeChange={onRefresh} />}
     </div>
   );
@@ -5888,11 +5907,15 @@ function buildDiffTree(files: DiffFile[]): DiffTreeNode[] {
     }
   }
 
-  // Sort alphabetically (no folder/file distinction)
+  // Sort: folders first, then files, alphabetically within each group
   const sortNodes = (nodes: DiffTreeNode[]): DiffTreeNode[] => {
     return nodes
       .map(n => ({ ...n, children: sortNodes(n.children) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return a.name.localeCompare(b.name);
+      });
   };
 
   return sortNodes(root);
@@ -5901,7 +5924,13 @@ function buildDiffTree(files: DiffFile[]): DiffTreeNode[] {
 // Store expanded paths per issue
 const diffTreeExpandedPaths = new Map<string, Set<string>>();
 
-function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | null; onFilesCountChange?: (count: number) => void }) {
+
+function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile }: {
+  issueKey: string | null;
+  onFilesCountChange?: (count: number) => void;
+  onFileSelect?: (file: DiffFile | null) => void;
+  selectedFile?: string | null;
+}) {
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [tree, setTree] = useState<DiffTreeNode[]>([]);
   const [expandedPaths, setExpandedPathsState] = useState<Set<string>>(() => {
@@ -5986,6 +6015,7 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
       return;
     }
 
+    let cancelled = false; // Abort flag for race condition
     const projectKey = getProjectKeyFromIssueKey(issueKey);
 
     const fetchDiff = async () => {
@@ -6005,18 +6035,32 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
 
       try {
         const parseOutput = (out: string, defaultStatus?: string): DiffFile[] => {
-          return out.trim().split("\n").filter(Boolean).map(line => {
+          const files = out.trim().split("\n").filter(Boolean).map(line => {
             if (defaultStatus) {
-              return { status: defaultStatus, path: line.trim() };
+              const path = line.trim();
+              if (path.endsWith('/')) return null;
+              return { status: defaultStatus, path };
             }
             // git diff --name-status format: "M\tpath" or "R100\told\tnew"
             const parts = line.split("\t");
             if (parts.length < 2) return null;
             const status = parts[0].charAt(0); // M, A, D, R, C, etc.
-            // For rename/copy (R/C), use the new path (last one)
             const path = parts[parts.length - 1];
+            if (path.endsWith('/')) return null;
             return { status, path };
           }).filter((f): f is DiffFile => f !== null);
+
+          // Filter out directories: if path X exists and path X/something also exists, X is a directory
+          const allPaths = new Set(files.map(f => f.path));
+          return files.filter(f => {
+            // Check if any other path starts with this path + "/"
+            for (const p of allPaths) {
+              if (p !== f.path && p.startsWith(f.path + '/')) {
+                return false; // This is a directory, skip it
+              }
+            }
+            return true;
+          });
         };
 
         let allFiles: DiffFile[] = [];
@@ -6039,63 +6083,64 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
 
         if (diffMode === "base") {
           // Base mode: compare with base branch + current changes
-          const committedOutput = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--name-status", `${currentBaseBranch}...HEAD`],
-          }).catch(() => "");
+          // Run all git commands in parallel
+          const [
+            committedOutput,
+            committedNumstat,
+            uncommittedOutput,
+            uncommittedNumstat,
+            stagedOutput,
+            stagedNumstat,
+            statusOutput,
+          ] = await Promise.all([
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--name-status", `${currentBaseBranch}...HEAD`] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--numstat", `${currentBaseBranch}...HEAD`] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--name-status"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--numstat"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--name-status", "--cached"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--numstat", "--cached"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["status", "--porcelain"] }).catch(() => ""),
+          ]);
 
-          const committedNumstat = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--numstat", `${currentBaseBranch}...HEAD`],
-          }).catch(() => "");
+          // Parse untracked files from porcelain output (lines starting with "??")
+          const untrackedFiles = statusOutput.trim().split("\n").filter(Boolean)
+            .filter(line => line.startsWith("?? "))
+            .map(line => line.slice(3)); // Remove "?? " prefix
 
-          const uncommittedOutput = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--name-status"],
-          }).catch(() => "");
-
-          const uncommittedNumstat = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--numstat"],
-          }).catch(() => "");
-
-          const stagedOutput = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--name-status", "--cached"],
-          }).catch(() => "");
-
-          const stagedNumstat = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--numstat", "--cached"],
-          }).catch(() => "");
-
-          const untrackedOutput = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["ls-files", "--others", "--exclude-standard"],
-          }).catch(() => "");
-
-          allFiles = [
+          const rawFiles = [
             ...parseOutput(committedOutput),
             ...parseOutput(uncommittedOutput),
             ...parseOutput(stagedOutput),
-            ...parseOutput(untrackedOutput, "A"),
+            ...untrackedFiles.map(path => ({ status: "A", path })),
           ];
 
-          // Count lines for untracked files
-          const untrackedFiles = parseOutput(untrackedOutput, "A").map(f => f.path);
-          let untrackedLines = 0;
-          if (untrackedFiles.length > 0) {
-            const results = await Promise.all(
-              untrackedFiles.slice(0, 20).map(file =>
+          // Filter out symlinks and directories (but keep deleted files)
+          const filesToCheck = rawFiles.filter(f => f.status !== "D");
+          const deletedFiles = rawFiles.filter(f => f.status === "D");
+
+          // Run filter_real_files and untracked line count in parallel
+          const [realFilePaths, untrackedLineResults] = await Promise.all([
+            invoke<string[]>("filter_real_files", {
+              basePath: worktreeInfo.path,
+              paths: filesToCheck.map(f => f.path),
+            }).catch(() => filesToCheck.map(f => f.path)),
+            Promise.all(
+              untrackedFiles.map(file =>
                 invoke<string>("run_git_command", {
                   cwd: worktreeInfo.path,
                   args: ["diff", "--numstat", "--no-index", "/dev/null", file],
                 }).catch(() => "")
               )
-            );
-            untrackedLines = results.reduce((sum, r) => sum + parseNumstat(r).additions, 0);
-          }
+            ),
+          ]);
 
+          const realFileSet = new Set(realFilePaths);
+          allFiles = [
+            ...filesToCheck.filter(f => realFileSet.has(f.path)),
+            ...deletedFiles,
+          ];
+
+          const untrackedLines = untrackedLineResults.reduce((sum, r) => sum + parseNumstat(r).additions, 0);
           const committedStats = parseNumstat(committedNumstat);
           const uncommittedStats = parseNumstat(uncommittedNumstat);
           const stagedStats = parseNumstat(stagedNumstat);
@@ -6103,52 +6148,59 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
           totalDeletions = committedStats.deletions + uncommittedStats.deletions + stagedStats.deletions;
         } else {
           // Current mode: unstaged + staged + untracked
-          const uncommittedOutput = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--name-status"],
-          }).catch(() => "");
+          // Run all git commands in parallel
+          const [
+            uncommittedOutput,
+            uncommittedNumstat,
+            stagedOutput,
+            stagedNumstat,
+            statusOutput,
+          ] = await Promise.all([
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--name-status"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--numstat"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--name-status", "--cached"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["diff", "--numstat", "--cached"] }).catch(() => ""),
+            invoke<string>("run_git_command", { cwd: worktreeInfo.path, args: ["status", "--porcelain"] }).catch(() => ""),
+          ]);
 
-          const uncommittedNumstat = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--numstat"],
-          }).catch(() => "");
+          // Parse untracked files from porcelain output (lines starting with "??")
+          const untrackedFiles = statusOutput.trim().split("\n").filter(Boolean)
+            .filter(line => line.startsWith("?? "))
+            .map(line => line.slice(3)); // Remove "?? " prefix
 
-          const stagedOutput = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--name-status", "--cached"],
-          }).catch(() => "");
-
-          const stagedNumstat = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", "--numstat", "--cached"],
-          }).catch(() => "");
-
-          const untrackedOutput = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["ls-files", "--others", "--exclude-standard"],
-          }).catch(() => "");
-
-          allFiles = [
+          const rawFiles = [
             ...parseOutput(uncommittedOutput),
             ...parseOutput(stagedOutput),
-            ...parseOutput(untrackedOutput, "A"),
+            ...untrackedFiles.map(path => ({ status: "A", path })),
           ];
 
-          // Count lines for untracked files
-          const untrackedFiles = parseOutput(untrackedOutput, "A").map(f => f.path);
-          let untrackedLines = 0;
-          if (untrackedFiles.length > 0) {
-            const results = await Promise.all(
-              untrackedFiles.slice(0, 20).map(file =>
+          // Filter out symlinks and directories (but keep deleted files)
+          const filesToCheck = rawFiles.filter(f => f.status !== "D");
+          const deletedFiles = rawFiles.filter(f => f.status === "D");
+
+          // Run filter_real_files and untracked line count in parallel
+          const [realFilePaths, untrackedLineResults] = await Promise.all([
+            invoke<string[]>("filter_real_files", {
+              basePath: worktreeInfo.path,
+              paths: filesToCheck.map(f => f.path),
+            }).catch(() => filesToCheck.map(f => f.path)),
+            Promise.all(
+              untrackedFiles.map(file =>
                 invoke<string>("run_git_command", {
                   cwd: worktreeInfo.path,
                   args: ["diff", "--numstat", "--no-index", "/dev/null", file],
                 }).catch(() => "")
               )
-            );
-            untrackedLines = results.reduce((sum, r) => sum + parseNumstat(r).additions, 0);
-          }
+            ),
+          ]);
 
+          const realFileSet = new Set(realFilePaths);
+          allFiles = [
+            ...filesToCheck.filter(f => realFileSet.has(f.path)),
+            ...deletedFiles,
+          ];
+
+          const untrackedLines = untrackedLineResults.reduce((sum, r) => sum + parseNumstat(r).additions, 0);
           const uncommittedStats = parseNumstat(uncommittedNumstat);
           const stagedStats = parseNumstat(stagedNumstat);
           totalAdditions = uncommittedStats.additions + stagedStats.additions + untrackedLines;
@@ -6160,11 +6212,20 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
           new Map(allFiles.map(f => [f.path, f])).values()
         );
 
+        // Ignore if issue changed while fetching
+        if (cancelled) return;
+
         setFiles(uniqueFiles);
         setTree(buildDiffTree(uniqueFiles));
         onFilesCountChange?.(uniqueFiles.length);
         setLineStats({ additions: totalAdditions, deletions: totalDeletions });
+
+        // Close diff viewer if selected file is no longer in the list
+        if (selectedFile && !uniqueFiles.some(f => f.path === selectedFile)) {
+          onFileSelect?.(null);
+        }
       } catch (e) {
+        if (cancelled) return;
         console.error("Failed to fetch diff:", e);
         setFiles([]);
         setTree([]);
@@ -6173,9 +6234,37 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
       }
     };
 
-    fetchDiff();
-    const interval = setInterval(fetchDiff, 5000);
-    return () => clearInterval(interval);
+    // Quick check function - only runs git status to detect changes
+    let lastStatusHash = "";
+    const quickCheck = async () => {
+      const worktreeInfo = getIssueWorktree(projectKey, issueKey);
+      if (!worktreeInfo) return;
+
+      try {
+        // Fast status check
+        const statusOutput = await invoke<string>("run_git_command", {
+          cwd: worktreeInfo.path,
+          args: ["status", "--porcelain"],
+        }).catch(() => "");
+
+        // Create a simple hash of the status
+        const currentHash = statusOutput;
+
+        if (currentHash !== lastStatusHash) {
+          lastStatusHash = currentHash;
+          fetchDiff();
+        }
+      } catch {
+        // Ignore errors in quick check
+      }
+    };
+
+    fetchDiff(); // Initial fetch
+    const interval = setInterval(quickCheck, 1000); // Quick check every 1s
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueKey, baseBranch, diffMode]);
 
@@ -6275,15 +6364,21 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
         <div key={node.path}>
           <div
             className="diff-tree-item diff-tree-dir"
-            style={{ paddingLeft: depth * 8 }}
+            style={{ '--depth': depth } as React.CSSProperties}
             onClick={() => toggleExpand(node.path)}
           >
-            <svg className={`diff-tree-chevron ${isExpanded ? "open" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
+            <span className="diff-tree-status-slot">
+              <svg className={`diff-tree-chevron ${isExpanded ? "open" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </span>
             <span className="diff-tree-name">{node.name}</span>
           </div>
-          {isExpanded && node.children.map(child => renderNode(child, depth + 1))}
+          {isExpanded && (
+            <div className="diff-tree-children" style={{ '--depth': depth } as React.CSSProperties}>
+              {node.children.map(child => renderNode(child, 0))}
+            </div>
+          )}
         </div>
       );
     }
@@ -6291,9 +6386,10 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
     return (
       <div
         key={node.path}
-        className="diff-tree-item diff-tree-file"
-        style={{ paddingLeft: depth * 8 + 12 }}
+        className={`diff-tree-item diff-tree-file ${selectedFile === node.path ? "selected" : ""}`}
+        style={{ '--depth': depth } as React.CSSProperties}
         title={`${getStatusLabel(node.status || "")} - ${node.path}`}
+        onClick={() => onFileSelect?.({ path: node.path, status: node.status || "" })}
       >
         <span className="diff-tree-status" style={{ color: getStatusColor(node.status || "") }}>
           {node.status}
@@ -6400,17 +6496,26 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
           )}
         </button>
       </div>
-      {files.length === 0 ? null : viewMode === "tree" ? (
+      {files.length === 0 ? (
+        <div className="diff-tree-empty">No changes</div>
+      ) : viewMode === "tree" ? (
         <div className="diff-tree-content">
           {tree.map(node => renderNode(node))}
         </div>
       ) : (
         <div className="diff-tree-content">
-          {[...files].sort((a, b) => a.path.localeCompare(b.path)).map(file => (
+          {[...files].sort((a, b) => {
+            const aHasDir = a.path.includes('/');
+            const bHasDir = b.path.includes('/');
+            if (aHasDir && !bHasDir) return -1;
+            if (!aHasDir && bHasDir) return 1;
+            return a.path.localeCompare(b.path);
+          }).map(file => (
             <div
               key={file.path}
-              className="diff-tree-item diff-tree-file"
+              className={`diff-tree-item diff-tree-file diff-tree-flat ${selectedFile === file.path ? "selected" : ""}`}
               title={`${getStatusLabel(file.status)} - ${file.path}`}
+              onClick={() => onFileSelect?.(file)}
             >
               <span className="diff-tree-status" style={{ color: getStatusColor(file.status) }}>
                 {file.status}
@@ -6422,6 +6527,497 @@ function DiffFileTree({ issueKey, onFilesCountChange }: { issueKey: string | nul
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// File Diff Viewer Component
+type DiffLine = { type: 'add' | 'del' | 'context' | 'expand'; content: string; oldNum?: number; newNum?: number; expandLines?: number; expandStart?: number };
+type DiffHunk = {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+  lines: DiffLine[];
+};
+
+function getLanguageFromPath(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() || '';
+  const langMap: Record<string, string> = {
+    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+    py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java',
+    c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', cs: 'csharp',
+    css: 'css', scss: 'scss', less: 'less', html: 'html', xml: 'xml',
+    json: 'json', yaml: 'yaml', yml: 'yaml', md: 'markdown',
+    sh: 'bash', bash: 'bash', zsh: 'bash', sql: 'sql',
+    swift: 'swift', kt: 'kotlin', php: 'php', vue: 'vue', svelte: 'svelte',
+  };
+  return langMap[ext] || 'text';
+}
+
+
+function FileDiffViewer({ issueKey, file, onBack }: {
+  issueKey: string;
+  file: DiffFile;
+  onBack: () => void;
+}) {
+  const [hunks, setHunks] = useState<DiffHunk[]>([]);
+  const [modeChange, setModeChange] = useState<{ oldMode: string; newMode: string } | null>(null);
+  const [displayedFile, setDisplayedFile] = useState(file);
+  // Track which gaps are expanded (always start collapsed)
+  const [expandedGaps, setExpandedGaps] = useState<Set<number>>(new Set());
+  const lastFilePathRef = useRef(file.path);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  const projectKey = getProjectKeyFromIssueKey(issueKey);
+  const worktreeInfo = getIssueWorktree(projectKey, issueKey);
+
+  const openInZed = async () => {
+    if (!worktreeInfo) return;
+    try {
+      const fullPath = `${worktreeInfo.path}/${displayedFile.path}`;
+      await invoke("open_in_zed", { path: fullPath });
+    } catch (e) {
+      console.error("Failed to open in Zed:", e);
+    }
+  };
+
+  const toggleGap = (hunkIdx: number) => {
+    setExpandedGaps(prev => {
+      const next = new Set(prev);
+      if (next.has(hunkIdx)) {
+        next.delete(hunkIdx);
+      } else {
+        next.add(hunkIdx);
+      }
+      return next;
+    });
+  };
+
+  const language = getLanguageFromPath(displayedFile.path);
+
+  const parseDiff = (diffText: string, isNewFile: boolean): DiffHunk[] => {
+    const lines = diffText.split('\n').filter((line, idx, arr) =>
+      // Remove trailing empty line
+      !(idx === arr.length - 1 && line === '')
+    );
+    const result: DiffHunk[] = [];
+    let currentHunk: DiffHunk | null = null;
+    let oldLineNum = 0;
+    let newLineNum = 0;
+
+    for (const line of lines) {
+      // Skip metadata
+      if (line.startsWith('diff --git') || line.startsWith('index ') ||
+          line.startsWith('---') || line.startsWith('+++') ||
+          line.startsWith('new file mode') || line.startsWith('deleted file mode') ||
+          line.startsWith('old mode') || line.startsWith('new mode') ||
+          line.startsWith('similarity index') || line.startsWith('rename from') ||
+          line.startsWith('rename to') || line.startsWith('Binary files') ||
+          line === '\\ No newline at end of file') {
+        continue;
+      }
+
+      // Parse hunk header
+      const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (hunkMatch) {
+        if (currentHunk) result.push(currentHunk);
+        oldLineNum = parseInt(hunkMatch[1]);
+        newLineNum = parseInt(hunkMatch[3]);
+        currentHunk = {
+          oldStart: oldLineNum,
+          oldCount: parseInt(hunkMatch[2] || '1'),
+          newStart: newLineNum,
+          newCount: parseInt(hunkMatch[4] || '1'),
+          lines: []
+        };
+        continue;
+      }
+
+      if (!currentHunk && !isNewFile) continue;
+
+      // For new files without hunk headers
+      if (!currentHunk && isNewFile) {
+        currentHunk = { oldStart: 0, oldCount: 0, newStart: 1, newCount: lines.length, lines: [] };
+        newLineNum = 1;
+      }
+
+      if (line.startsWith('+')) {
+        currentHunk!.lines.push({ type: 'add', content: line.slice(1), newNum: newLineNum++ });
+      } else if (line.startsWith('-')) {
+        currentHunk!.lines.push({ type: 'del', content: line.slice(1), oldNum: oldLineNum++ });
+      } else {
+        currentHunk!.lines.push({ type: 'context', content: line.startsWith(' ') ? line.slice(1) : line, oldNum: oldLineNum++, newNum: newLineNum++ });
+      }
+    }
+
+    if (currentHunk) result.push(currentHunk);
+    return result;
+  };
+
+  const fetchDiff = useCallback(async () => {
+    const projectKey = getProjectKeyFromIssueKey(issueKey);
+    const worktreeInfo = getIssueWorktree(projectKey, issueKey);
+
+    if (!worktreeInfo) {
+      setHunks([]);
+      setDisplayedFile(file);
+      return;
+    }
+
+    // Get diffMode from localStorage to match DiffFileTree behavior
+    const diffMode = localStorage.getItem("diff_mode") || "current";
+    const baseBranch = worktreeInfo.baseBranch;
+
+    // Fetch with large context for expandable sections (but not too large to avoid issues)
+    const ctx = 5000;
+
+    try {
+      let diffOutput = "";
+      let isNewFile = false;
+
+      if (file.status === "A") {
+        isNewFile = true;
+        const content = await invoke<string>("read_file", {
+          path: `${worktreeInfo.path}/${file.path}`,
+        }).catch(() => "");
+        diffOutput = content.split("\n").map(line => `+${line}`).join("\n");
+      } else if (file.status === "D") {
+        diffOutput = await invoke<string>("run_git_command", {
+          cwd: worktreeInfo.path,
+          args: ["diff", `--unified=${ctx}`, "HEAD", "--", file.path],
+        }).catch(() => "");
+      } else {
+        if (diffMode === "base" && baseBranch) {
+          // Base mode: compare merge-base with working directory (includes uncommitted changes)
+          const mergeBase = await invoke<string>("run_git_command", {
+            cwd: worktreeInfo.path,
+            args: ["merge-base", baseBranch, "HEAD"],
+          }).catch(() => "");
+
+          if (mergeBase.trim()) {
+            diffOutput = await invoke<string>("run_git_command", {
+              cwd: worktreeInfo.path,
+              args: ["diff", `--unified=${ctx}`, mergeBase.trim(), "--", file.path],
+            }).catch(() => "");
+          }
+        } else {
+          // Current mode: show staged + unstaged changes
+          // First try staged changes
+          const stagedDiff = await invoke<string>("run_git_command", {
+            cwd: worktreeInfo.path,
+            args: ["diff", `--unified=${ctx}`, "--cached", "--", file.path],
+          }).catch(() => "");
+
+          // Then try unstaged changes
+          const unstagedDiff = await invoke<string>("run_git_command", {
+            cwd: worktreeInfo.path,
+            args: ["diff", `--unified=${ctx}`, "--", file.path],
+          }).catch(() => "");
+
+          // Use whichever has content (prefer unstaged as it's more current)
+          diffOutput = unstagedDiff || stagedDiff;
+        }
+      }
+
+      const parsed = parseDiff(diffOutput, isNewFile);
+      setHunks(parsed);
+      setDisplayedFile(file);
+
+      // Detect mode change
+      const oldModeMatch = diffOutput.match(/old mode (\d+)/);
+      const newModeMatch = diffOutput.match(/new mode (\d+)/);
+      if (oldModeMatch && newModeMatch) {
+        setModeChange({ oldMode: oldModeMatch[1], newMode: newModeMatch[1] });
+      } else {
+        setModeChange(null);
+      }
+
+      // Reset expanded state and scroll when file changes
+      if (lastFilePathRef.current !== file.path) {
+        setExpandedGaps(new Set());
+        lastFilePathRef.current = file.path;
+        contentRef.current?.scrollTo(0, 0);
+      }
+    } catch (e) {
+      console.error("Failed to fetch diff:", e);
+      setHunks([]);
+      setModeChange(null);
+      setDisplayedFile(file);
+    }
+  }, [issueKey, file]);
+
+  useEffect(() => {
+    fetchDiff();
+  }, [fetchDiff]);
+
+  // Process hunks into sections with collapsible context regions
+  const processedSections = useMemo(() => {
+    if (hunks.length === 0) return [];
+
+    const allLines = hunks.flatMap(h => h.lines);
+    const sections: { type: 'change' | 'context'; lines: typeof allLines; startLine: number; endLine: number }[] = [];
+    let currentSection: typeof sections[0] | null = null;
+
+    for (const line of allLines) {
+      const isChange = line.type === 'add' || line.type === 'del';
+      const sectionType = isChange ? 'change' : 'context';
+
+      if (!currentSection || currentSection.type !== sectionType) {
+        if (currentSection) {
+          currentSection.endLine = currentSection.lines[currentSection.lines.length - 1]?.newNum ||
+                                   currentSection.lines[currentSection.lines.length - 1]?.oldNum || 0;
+          sections.push(currentSection);
+        }
+        currentSection = {
+          type: sectionType,
+          lines: [line],
+          startLine: line.newNum || line.oldNum || 0,
+          endLine: 0
+        };
+      } else {
+        currentSection.lines.push(line);
+      }
+    }
+
+    if (currentSection) {
+      currentSection.endLine = currentSection.lines[currentSection.lines.length - 1]?.newNum ||
+                               currentSection.lines[currentSection.lines.length - 1]?.oldNum || 0;
+      sections.push(currentSection);
+    }
+
+    return sections;
+  }, [hunks]);
+
+  const collapsibleIndices = processedSections
+    .map((section, idx) => section.type === 'context' && section.lines.length > 6 ? idx : -1)
+    .filter(idx => idx !== -1);
+
+  const isAllExpanded = collapsibleIndices.length > 0 &&
+    collapsibleIndices.every(idx => expandedGaps.has(idx));
+
+  const toggleAllContexts = () => {
+    if (isAllExpanded) {
+      setExpandedGaps(new Set());
+    } else {
+      setExpandedGaps(new Set(collapsibleIndices));
+    }
+  };
+
+  const renderLine = (line: DiffLine, lineIdx: number) => (
+    <div key={lineIdx} className={`diff-line diff-line-${line.type}`}>
+      <span className="diff-line-num">{line.newNum ?? line.oldNum ?? ''}</span>
+      <span className="diff-line-code">
+        <SyntaxHighlighter
+          language={language}
+          style={vscDarkPlus as { [key: string]: React.CSSProperties }}
+          customStyle={{
+            background: 'transparent',
+            margin: 0,
+            padding: 0,
+            display: 'inline',
+            fontSize: 'inherit',
+            lineHeight: 'inherit',
+          }}
+          codeTagProps={{ style: { background: 'transparent' } }}
+          PreTag="span"
+          renderer={({ rows, stylesheet, useInlineStyles }) => {
+            const renderText = (text: string, keyPrefix: string) => {
+              const parts: React.ReactNode[] = [];
+              const chars = Array.from(text); // Handle surrogate pairs (emojis)
+              for (let c = 0; c < chars.length; c++) {
+                if (chars[c] === ' ') {
+                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-space"> </span>);
+                } else if (chars[c] === '\t') {
+                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-tab">{'\t'}</span>);
+                } else {
+                  parts.push(chars[c]);
+                }
+              }
+              return parts;
+            };
+            return (
+              <>
+                {rows.map((row, i) => (
+                  <span key={i}>
+                    {row.children?.map((child, j) => {
+                      if (child.type === 'text') {
+                        const text = child.value || '';
+                        return <span key={j}>{renderText(text, `${j}`)}</span>;
+                      }
+                      const style = useInlineStyles
+                        ? child.properties?.style || (child.properties?.className?.reduce((acc: Record<string, string>, cls: string) => ({ ...acc, ...stylesheet[cls] }), {}) as React.CSSProperties)
+                        : undefined;
+                      const content = child.children?.map((c: { value?: string }) => c.value).join('') || '';
+                      return <span key={j} style={style}>{renderText(content, `${j}`)}</span>;
+                    })}
+                  </span>
+                ))}
+              </>
+            );
+          }}
+        >
+          {line.content || '\u00A0'}
+        </SyntaxHighlighter>
+      </span>
+    </div>
+  );
+
+  // Default context lines to show around changes
+  const CONTEXT_PREVIEW = 3;
+
+  return (
+    <div className="file-diff-viewer" tabIndex={0}>
+      <div className="file-diff-back-row">
+        <button className="file-diff-back" onClick={onBack} title="Back to issue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+      </div>
+      <div className="file-diff-header">
+        <span className="file-diff-status" style={{ color: `var(--status-${displayedFile.status === "A" ? "added" : displayedFile.status === "D" ? "deleted" : "modified"})` }}>
+          {displayedFile.status}
+        </span>
+        <button
+          className="file-diff-path-wrapper"
+          onClick={(e) => {
+            navigator.clipboard.writeText(displayedFile.path);
+            const btn = e.currentTarget;
+            btn.classList.add('copied');
+            setTimeout(() => btn.classList.remove('copied'), 1000);
+          }}
+          title="Copy path"
+        >
+          <span className="file-diff-path">{displayedFile.path}</span>
+          <svg className="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          <svg className="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </button>
+        {collapsibleIndices.length > 0 && (
+          <button
+            className="file-diff-action"
+            onClick={toggleAllContexts}
+            title={isAllExpanded ? "Collapse all" : "Expand all"}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+              {isAllExpanded ? (
+                <>
+                  <polyline points="4 14 10 14 10 20" />
+                  <polyline points="20 10 14 10 14 4" />
+                  <line x1="14" y1="10" x2="21" y2="3" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </>
+              ) : (
+                <>
+                  <polyline points="15 3 21 3 21 9" />
+                  <polyline points="9 21 3 21 3 15" />
+                  <line x1="21" y1="3" x2="14" y2="10" />
+                  <line x1="3" y1="21" x2="10" y2="14" />
+                </>
+              )}
+            </svg>
+          </button>
+        )}
+        <button
+          className="file-diff-action"
+          onClick={openInZed}
+          disabled={displayedFile.status === "D"}
+          title={displayedFile.status === "D" ? "File deleted" : "Open in Zed"}
+          style={{ opacity: displayedFile.status === "D" ? 0.3 : undefined }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        </button>
+      </div>
+      <div className="file-diff-content" ref={contentRef}>
+        {processedSections.length > 0 ? (
+          <div className="diff-hunks">
+            {modeChange && (
+              <div className="diff-mode-change-banner">
+                Mode changed: {modeChange.oldMode} → {modeChange.newMode}
+              </div>
+            )}
+            {processedSections.map((section, sectionIdx) => {
+              if (section.type === 'change') {
+                // Group consecutive lines of same type within changes
+                const groups: { type: string; lines: typeof section.lines }[] = [];
+                for (const line of section.lines) {
+                  const lastGroup = groups[groups.length - 1];
+                  if (lastGroup && lastGroup.type === line.type) {
+                    lastGroup.lines.push(line);
+                  } else {
+                    groups.push({ type: line.type, lines: [line] });
+                  }
+                }
+                return (
+                  <div key={sectionIdx} className="diff-hunk">
+                    {groups.map((group, groupIdx) => (
+                      <div key={groupIdx} className={`diff-group diff-group-${group.type}`}>
+                        {group.lines.map((line, lineIdx) => renderLine(line, lineIdx))}
+                      </div>
+                    ))}
+                  </div>
+                );
+              } else {
+                // Context section - can be collapsed
+                const isExpanded = expandedGaps.has(sectionIdx);
+                const lineCount = section.lines.length;
+                const canCollapse = lineCount > CONTEXT_PREVIEW * 2;
+
+                if (!canCollapse) {
+                  // Not enough lines to collapse - show all
+                  return (
+                    <div key={sectionIdx} className="diff-hunk">
+                      <div className="diff-group diff-group-context">
+                        {section.lines.map((line, lineIdx) => renderLine(line, lineIdx))}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Collapsible section
+                const topLines = section.lines.slice(0, CONTEXT_PREVIEW);
+                const middleLines = section.lines.slice(CONTEXT_PREVIEW, -CONTEXT_PREVIEW);
+                const bottomLines = section.lines.slice(-CONTEXT_PREVIEW);
+
+                return (
+                  <div key={sectionIdx} className="diff-hunk">
+                    <div className="diff-group diff-group-context">
+                      {topLines.map((line, lineIdx) => renderLine(line, lineIdx))}
+                    </div>
+                    <div className="diff-group-collapse">
+                      <div className="diff-hunk-separator" onClick={() => toggleGap(sectionIdx)}>
+                        <span className="diff-hunk-separator-gutter">{isExpanded ? '▲' : '▼'}</span>
+                        <span className="diff-hunk-separator-text">
+                          {isExpanded ? 'Collapse' : 'Expand'} {middleLines.length} lines
+                        </span>
+                      </div>
+                      {isExpanded && middleLines.map((line, lineIdx) => renderLine(line, lineIdx + CONTEXT_PREVIEW))}
+                    </div>
+                    <div className="diff-group diff-group-context">
+                      {bottomLines.map((line, lineIdx) => renderLine(line, lineIdx + topLines.length + (isExpanded ? middleLines.length : 0)))}
+                    </div>
+                  </div>
+                );
+              }
+            })}
+          </div>
+        ) : modeChange ? (
+          <div className="diff-hunks">
+            <div className="diff-mode-change-banner">
+              Mode changed: {modeChange.oldMode} → {modeChange.newMode}
+            </div>
+          </div>
+        ) : (
+          <div className="file-diff-empty">No changes</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -7195,9 +7791,13 @@ function ReviewRequestedPRs() {
 function MainApp({ onLogout }: { onLogout: () => void }) {
   const [sidebarWidth, setSidebarWidth] = useState(400);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [rightSidebarWidth, setRightSidebarWidth] = useState(250);
+  const [rightSidebarWidth, setRightSidebarWidth] = useState(400);
   const [rightSidebarCollapsed, setRightSidebarCollapsed] = useState(true);
   const [diffFilesCount, setDiffFilesCount] = useState(0);
+  const [selectedDiffFile, setSelectedDiffFile] = useState<DiffFile | null>(() => {
+    // Restore from per-issue storage if available
+    return null;
+  });
   const [isResizing, setIsResizing] = useState<'left' | 'right' | false>(false);
   const [settingsProject, setSettingsProject] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
@@ -7298,6 +7898,23 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Close diff file with CMD+W
+  useEffect(() => {
+    const shortcuts = getShortcuts();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (matchesShortcut(e, shortcuts.closeTerminalTab)) {
+        const diffViewer = document.querySelector('.file-diff-viewer');
+        const isDiffFocused = diffViewer?.contains(document.activeElement) || document.activeElement?.closest('.file-diff-viewer');
+        if (isDiffFocused && selectedDiffFile) {
+          e.preventDefault();
+          setSelectedDiffFile(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDiffFile]);
+
   // Auto polling
   useEffect(() => {
     const interval = setInterval(() => {
@@ -7354,6 +7971,8 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
   };
 
   const handleIssueClick = (issueKey: string) => {
+    // Close diff viewer when switching issues
+    setSelectedDiffFile(null);
     setSelectedIssue(issueKey);
     setSettingsProject(null);
     setCreateProject(null);
@@ -7394,32 +8013,32 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
     <div className="app-container">
       <div className="titlebar-drag-region" onMouseDown={() => getCurrentWindow().startDragging()} onDoubleClick={() => getCurrentWindow().toggleMaximize()} />
       <div
-        className="app"
+        className={`app ${isResizing ? 'resizing' : ''}`}
         onMouseMove={resize}
         onMouseUp={stopResizing}
         onMouseLeave={stopResizing}
         onDragStart={(e) => e.preventDefault()}
       >
         <div className="sidebar scrollable" style={{ width: sidebarCollapsed ? 0 : sidebarWidth, display: sidebarCollapsed ? 'none' : undefined }} onMouseDown={() => (document.activeElement as HTMLElement)?.blur?.()}>
+          <div className="sidebar-toggle-row">
+            <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="Hide sidebar (Cmd+B)">
+              <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+              </svg>
+            </button>
+          </div>
           <div className="sidebar-header">
             <span>Projects</span>
-            <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              {hiddenProjects.length > 0 && (
-                <button
-                  className="hidden-toggle"
-                  onClick={() => setShowHiddenPanel(!showHiddenPanel)}
-                  title="Show hidden projects"
-                >
-                  {hiddenProjects.length} hidden
-                </button>
-              )}
-              <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(true)} title="Hide sidebar (Cmd+B)">
-                <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/>
-                  <line x1="9" y1="3" x2="9" y2="21"/>
-                </svg>
+            {hiddenProjects.length > 0 && (
+              <button
+                className="hidden-toggle"
+                onClick={() => setShowHiddenPanel(!showHiddenPanel)}
+                title="Show hidden projects"
+              >
+                {hiddenProjects.length} hidden
               </button>
-            </div>
+            )}
           </div>
           {showHiddenPanel && hiddenProjects.length > 0 && (
             <div className="hidden-panel">
@@ -7470,7 +8089,20 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
             }}
           />
         ) : selectedIssue ? (
-          <IssueDetailView issueKey={selectedIssue} onIssueClick={handleIssueClick} onCreateChild={handleCreateChild} onRefresh={() => setRefreshTrigger(n => n + 1)} refreshTrigger={issueRefreshTrigger} terminalCollapsed={terminalCollapsed} setTerminalCollapsed={setTerminalCollapsed} terminalMaximized={terminalMaximized} setTerminalMaximized={setTerminalMaximized} />
+          <div className="issue-detail-container">
+            {selectedDiffFile ? (
+              <FileDiffViewer
+                issueKey={selectedIssue}
+                file={selectedDiffFile}
+                onBack={() => {
+                  setSelectedDiffFile(null);
+                }}
+              />
+            ) : (
+              <IssueDetailView issueKey={selectedIssue} onIssueClick={handleIssueClick} onCreateChild={handleCreateChild} onRefresh={() => setRefreshTrigger(n => n + 1)} refreshTrigger={issueRefreshTrigger} terminalCollapsed={terminalCollapsed} setTerminalCollapsed={setTerminalCollapsed} terminalMaximized={terminalMaximized} setTerminalMaximized={setTerminalMaximized} renderTerminal={false} />
+            )}
+            <TerminalPanel issueKey={selectedIssue} projectKey={getProjectKeyFromIssueKey(selectedIssue)} isCollapsed={terminalCollapsed} setIsCollapsed={setTerminalCollapsed} isMaximized={terminalMaximized} setIsMaximized={setTerminalMaximized} />
+          </div>
         ) : (
           <div className="empty-detail">
             <div className="empty-detail-content">
@@ -7495,7 +8127,12 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
             </span>
           </div>
           <div className="right-sidebar-content">
-            <DiffFileTree issueKey={selectedIssue} onFilesCountChange={setDiffFilesCount} />
+            <DiffFileTree
+              issueKey={selectedIssue}
+              onFilesCountChange={setDiffFilesCount}
+              onFileSelect={setSelectedDiffFile}
+              selectedFile={selectedDiffFile?.path}
+            />
           </div>
         </div>
       </div>
