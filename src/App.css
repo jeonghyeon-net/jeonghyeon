@@ -3137,9 +3137,14 @@ html, body, #root {
   cursor: pointer !important;
 }
 
-.terminal-repo-select-btn:hover {
+.terminal-repo-select-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--border-hover);
+}
+
+.terminal-repo-select-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
 }
 
 .terminal-repo-display {
@@ -3153,6 +3158,11 @@ html, body, #root {
   height: auto;
 }
 
+.terminal-repo-display.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .terminal-repo-path {
   flex: 1;
   font-size: var(--font-size-md);
@@ -3162,6 +3172,7 @@ html, body, #root {
   white-space: nowrap;
 }
 
+.terminal-repo-fetch-btn,
 .terminal-repo-clear-btn {
   display: flex;
   align-items: center;
@@ -3177,9 +3188,25 @@ html, body, #root {
   flex-shrink: 0;
 }
 
-.terminal-repo-clear-btn:hover {
+.terminal-repo-fetch-btn:hover:not(:disabled),
+.terminal-repo-clear-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+.terminal-repo-fetch-btn:disabled,
+.terminal-repo-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .terminal-repo-list {
@@ -3211,9 +3238,14 @@ html, body, #root {
   transition: all 0.15s;
 }
 
-.terminal-repo-list-item:hover {
+.terminal-repo-list-item:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--border-hover);
+}
+
+.terminal-repo-list-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
 }
 
 .terminal-repo-list-item-path {
@@ -3273,6 +3305,118 @@ html, body, #root {
   max-width: 300px;
 }
 
+.terminal-fetch-branches-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer !important;
+  transition: all 0.15s ease;
+}
+
+.terminal-fetch-branches-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.terminal-fetch-branches-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.terminal-branch-select-with-pull {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.terminal-branch-select-with-pull select {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-branch-pull-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  cursor: pointer !important;
+  flex-shrink: 0;
+}
+
+.terminal-branch-pull-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.terminal-branch-pull-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.terminal-pull-selected-branch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--text);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer !important;
+}
+
+.terminal-pull-selected-branch-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-hover);
+}
+
+.terminal-pull-selected-branch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.terminal-worktree-success {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 40px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-xs);
+  color: #d4f4dd;
+  background: rgba(16, 88, 42, 0.95);
+  border-radius: var(--radius-md);
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Existing branch mode has pull button + mode toggle button */
+.terminal-worktree-branch-input .terminal-worktree-success {
+  right: 80px;
+}
+
 .terminal-worktree-field {
   display: flex;
   flex-direction: column;
@@ -3285,7 +3429,8 @@ html, body, #root {
 }
 
 .terminal-worktree-field input,
-.terminal-worktree-field select {
+.terminal-worktree-field select,
+.terminal-branch-select-with-pull select {
   padding: 8px 10px;
   font-family: inherit;
   font-size: var(--font-size-md);
@@ -3297,8 +3442,16 @@ html, body, #root {
 }
 
 .terminal-worktree-field input:focus,
-.terminal-worktree-field select:focus {
+.terminal-worktree-field select:focus,
+.terminal-branch-select-with-pull select:focus {
   border-color: var(--border-hover);
+}
+
+.terminal-worktree-field input:disabled,
+.terminal-worktree-field select:disabled,
+.terminal-branch-select-with-pull select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
 }
 
 .terminal-worktree-field input {
@@ -3332,6 +3485,12 @@ html, body, #root {
   min-width: 0;
 }
 
+.terminal-worktree-branch-input input:disabled,
+.terminal-worktree-branch-input select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
 .terminal-worktree-branch-input input.input-error {
   border-color: var(--error, #dc3545);
   background-color: rgba(220, 53, 69, 0.1);
@@ -3358,10 +3517,15 @@ html, body, #root {
   transition: all 0.15s ease;
 }
 
-.terminal-worktree-mode-btn:hover {
+.terminal-worktree-mode-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   border-color: var(--border-hover);
   color: var(--text);
+}
+
+.terminal-worktree-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed !important;
 }
 
 .terminal-worktree-mode-hint {
@@ -3422,6 +3586,29 @@ html, body, #root {
 
 .terminal-branch-wrapper {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terminal-repo-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.terminal-repo-action-btn:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
 }
 
 .terminal-branch-badge {

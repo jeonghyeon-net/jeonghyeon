@@ -3769,6 +3769,10 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   const [worktreeError, setWorktreeError] = useState<string | null>(null);
   const [branchMode, setBranchMode] = useState<"new" | "existing">("new");
   const [selectedExistingBranch, setSelectedExistingBranch] = useState("");
+  const [pullingBranch, setPullingBranch] = useState<string | null>(null);
+  const [pullResult, setPullResult] = useState<string | null>(null);
+  const [lastPulledBranch, setLastPulledBranch] = useState<string | null>(null);
+  const pullResultTimeoutRef = useRef<number | null>(null);
 
   // Get project's used repo paths
   const getProjectRepoPaths = (): string[] => {
@@ -3845,7 +3849,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
 
   // Load branches function
   const branchLoadRequestIdRef = useRef(0);
-  const loadBranches = (targetRepoPath: string) => {
+  const loadBranches = (targetRepoPath: string, updateBaseBranch: boolean = true) => {
     const currentRequestId = ++branchLoadRequestIdRef.current;
 
     Promise.all([
@@ -3860,7 +3864,9 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
       setBranches(branchList);
       const current = (currentOutput as string).trim();
       setCurrentBranch(current);
-      setBaseBranch(current);
+      if (updateBaseBranch) {
+        setBaseBranch(current);
+      }
     }).catch(e => {
       if (branchLoadRequestIdRef.current !== currentRequestId) return;
       console.error("Failed to load branches:", e);
@@ -3868,10 +3874,76 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
     });
   };
 
+
+  // Pull specific branch
+  const pullBranch = async (branchName: string) => {
+    if (!repoPath || pullingBranch) return;
+
+    // Clear any existing timeout
+    if (pullResultTimeoutRef.current) {
+      clearTimeout(pullResultTimeoutRef.current);
+      pullResultTimeoutRef.current = null;
+    }
+
+    setPullingBranch(branchName);
+    setLastPulledBranch(branchName);
+    setWorktreeError(null);
+    setPullResult(null);
+    try {
+      let result: string;
+
+      // Current branch requires different approach
+      if (branchName === currentBranch) {
+        // Use git pull for current branch
+        result = await invoke<string>("run_git_command", { cwd: repoPath, args: ["pull"] });
+      } else {
+        // Fetch into non-current branch without checkout
+        result = await invoke<string>("run_git_command", { cwd: repoPath, args: ["fetch", "origin", `${branchName}:${branchName}`] });
+      }
+
+      // Parse result to determine if there were changes
+      if (result.includes("Already up to date") || result.includes("Already up-to-date") || result.trim() === "") {
+        setPullResult("✓ Already up to date");
+      } else if (result.includes("Updating") || result.includes("Fast-forward") || result.includes("->")) {
+        setPullResult("✓ Updated successfully");
+      } else {
+        setPullResult("✓ Pull completed");
+      }
+
+      loadBranches(repoPath, false);
+
+      // Clear success message after 3 seconds
+      pullResultTimeoutRef.current = setTimeout(() => {
+        setPullResult(null);
+        setLastPulledBranch(null);
+        pullResultTimeoutRef.current = null;
+      }, 3000);
+    } catch (e: any) {
+      console.error("Failed to pull branch:", e);
+      setWorktreeError(`Failed to pull ${branchName}: ` + (e?.toString() || "Unknown error"));
+      setLastPulledBranch(null);
+      // Clear any pending timeout on error
+      if (pullResultTimeoutRef.current) {
+        clearTimeout(pullResultTimeoutRef.current);
+        pullResultTimeoutRef.current = null;
+      }
+    } finally {
+      setPullingBranch(null);
+    }
+  };
+
   // Load branches when repoPath is set or issue changes
   useEffect(() => {
     if (!repoPath || worktreeInfo) return;
     loadBranches(repoPath);
+
+    // Cleanup timeout on issue change or unmount
+    return () => {
+      if (pullResultTimeoutRef.current) {
+        clearTimeout(pullResultTimeoutRef.current);
+        pullResultTimeoutRef.current = null;
+      }
+    };
   }, [repoPath, worktreeInfo, issueKey]);
 
   // Create worktree
@@ -4581,7 +4653,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                 <div className="terminal-worktree-form">
                   <div className="terminal-worktree-field">
                     <label>Repository Folder</label>
-                    <button className="terminal-repo-select-btn" onClick={selectRepository}>
+                    <button className="terminal-repo-select-btn" onClick={selectRepository} disabled={pullingBranch !== null || isCreatingWorktree}>
                       <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                       </svg>
@@ -4596,6 +4668,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                             className="terminal-repo-list-item"
                             onClick={() => setRepoPath(path)}
                             title={path}
+                            disabled={pullingBranch !== null || isCreatingWorktree}
                           >
                             <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -4630,9 +4703,9 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                 <div className="terminal-worktree-form">
                   <div className="terminal-worktree-field">
                     <label>Repository</label>
-                    <div className="terminal-repo-display">
+                    <div className={`terminal-repo-display ${pullingBranch !== null || isCreatingWorktree ? 'disabled' : ''}`}>
                       <span className="terminal-repo-path">{repoPath}</span>
-                      <button className="terminal-repo-clear-btn" onClick={() => { setRepoPath(null); setBranches([]); }} title="Clear repository">
+                      <button className="terminal-repo-clear-btn" onClick={() => { setRepoPath(null); setBranches([]); }} title="Clear repository" disabled={pullingBranch !== null || isCreatingWorktree}>
                         <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M18 6L6 18M6 6l12 12" />
                         </svg>
@@ -4642,27 +4715,42 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                   {branchMode === "new" && (
                     <div className="terminal-worktree-field">
                       <label>Base Branch</label>
-                      <select value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)}>
-                        {branches.filter(b => !b.startsWith("remotes/")).length > 0 && (
-                          <optgroup label="Local">
-                            {branches.filter(b => !b.startsWith("remotes/")).map(b => (
-                              <option key={b} value={b}>{b}{b === currentBranch ? " (current)" : ""}</option>
-                            ))}
-                          </optgroup>
+                      <div className="terminal-branch-select-with-pull" style={{ position: 'relative' }}>
+                        {pullResult && lastPulledBranch === baseBranch && (
+                          <div className="terminal-worktree-success">{pullResult}</div>
                         )}
-                        {branches.filter(b => b.startsWith("remotes/")).length > 0 && (
-                          <optgroup label="Remote">
-                            {branches.filter(b => b.startsWith("remotes/")).map(b => (
-                              <option key={b} value={b}>{b.replace("remotes/", "")}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                      </select>
+                        <select value={baseBranch} onChange={(e) => setBaseBranch(e.target.value)} disabled={pullingBranch !== null || isCreatingWorktree}>
+                          {branches.map(b => (
+                            <option key={b} value={b}>{b}{b === currentBranch ? " (current)" : ""}</option>
+                          ))}
+                        </select>
+                        <button
+                          className="terminal-branch-pull-btn"
+                          onClick={() => pullBranch(baseBranch)}
+                          disabled={!baseBranch || pullingBranch !== null || isCreatingWorktree}
+                          title="Pull latest changes"
+                        >
+                          {pullingBranch === baseBranch ? (
+                            <svg className={`icon-sm spinning`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                              <path d="M21 3v5h-5" />
+                            </svg>
+                          ) : (
+                            <svg className={`icon-sm`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="12" y1="5" x2="12" y2="19" />
+                              <polyline points="19 12 12 19 5 12" />
+                            </svg>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   )}
                   <div className="terminal-worktree-field">
                     <label>Branch</label>
-                    <div className="terminal-worktree-branch-input">
+                    <div className="terminal-worktree-branch-input" style={{ position: 'relative' }}>
+                      {pullResult && branchMode === "existing" && lastPulledBranch === selectedExistingBranch && (
+                        <div className="terminal-worktree-success">{pullResult}</div>
+                      )}
                       {branchMode === "new" ? (
                         <input
                           type="text"
@@ -4670,42 +4758,54 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                           onChange={(e) => setBranchName(e.target.value)}
                           placeholder={issueKey}
                           className={branchNameError ? "input-error" : ""}
+                          disabled={pullingBranch !== null || isCreatingWorktree}
                         />
                       ) : (
-                        <select
-                          value={selectedExistingBranch}
-                          onChange={(e) => setSelectedExistingBranch(e.target.value)}
-                        >
-                          <option value="" disabled>Select branch...</option>
-                          {branches.filter(b => !b.startsWith("remotes/")).length > 0 && (() => {
-                            const usedBranches = getUsedBranches();
-                            return (
-                              <optgroup label="Local">
-                                {branches.filter(b => !b.startsWith("remotes/")).map(b => {
-                                  const isUsed = usedBranches.has(b);
-                                  const isCurrent = b === currentBranch;
-                                  return (
-                                    <option key={b} value={b} disabled={isUsed || isCurrent}>
-                                      {b}{isCurrent ? " (current)" : ""}{isUsed ? " (in use)" : ""}
-                                    </option>
-                                  );
-                                })}
-                              </optgroup>
-                            );
-                          })()}
-                          {branches.filter(b => b.startsWith("remotes/")).length > 0 && (
-                            <optgroup label="Remote">
-                              {branches.filter(b => b.startsWith("remotes/")).map(b => (
-                                <option key={b} value={b}>{b.replace("remotes/", "")}</option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
+                        <>
+                          <select
+                            value={selectedExistingBranch}
+                            onChange={(e) => setSelectedExistingBranch(e.target.value)}
+                            disabled={pullingBranch !== null || isCreatingWorktree}
+                          >
+                            <option value="" disabled>Select branch...</option>
+                            {(() => {
+                              const usedBranches = getUsedBranches();
+                              return branches.map(b => {
+                                const isUsed = usedBranches.has(b);
+                                const isCurrent = b === currentBranch;
+                                return (
+                                  <option key={b} value={b} disabled={isUsed || isCurrent}>
+                                    {b}{isCurrent ? " (current)" : ""}{isUsed ? " (in use)" : ""}
+                                  </option>
+                                );
+                              });
+                            })()}
+                          </select>
+                          <button
+                            className="terminal-branch-pull-btn"
+                            onClick={() => pullBranch(selectedExistingBranch)}
+                            disabled={!selectedExistingBranch || pullingBranch !== null || isCreatingWorktree}
+                            title="Pull latest changes"
+                          >
+                            {pullingBranch === selectedExistingBranch ? (
+                              <svg className={`icon-sm spinning`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />
+                                <path d="M21 3v5h-5" />
+                              </svg>
+                            ) : (
+                              <svg className={`icon-sm`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <polyline points="19 12 12 19 5 12" />
+                              </svg>
+                            )}
+                          </button>
+                        </>
                       )}
                       <button
                         className="terminal-worktree-mode-btn"
                         onClick={() => setBranchMode(branchMode === "new" ? "existing" : "new")}
                         title={branchMode === "new" ? "Use existing branch" : "Create new branch"}
+                        disabled={pullingBranch !== null || isCreatingWorktree}
                       >
                         {branchMode === "new" ? (
                           <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -4726,16 +4826,18 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                     <div className="terminal-worktree-error">{worktreeError}</div>
                   )}
                   {branchMode === "existing" && selectedExistingBranch && (
-                    selectedExistingBranch === currentBranch ? (
-                      <div className="terminal-worktree-error">Cannot use current branch</div>
-                    ) : getUsedBranches().has(selectedExistingBranch) ? (
-                      <div className="terminal-worktree-error">This branch is in use by another issue</div>
-                    ) : null
+                    <>
+                      {selectedExistingBranch === currentBranch ? (
+                        <div className="terminal-worktree-error">Cannot use current branch</div>
+                      ) : getUsedBranches().has(selectedExistingBranch) ? (
+                        <div className="terminal-worktree-error">This branch is in use by another issue</div>
+                      ) : null}
+                    </>
                   )}
                   <button
                     className="terminal-connect-btn"
                     onClick={createWorktree}
-                    disabled={branchMode === "new" ? (!branchName || !baseBranch || !!branchNameError) : (!selectedExistingBranch || selectedExistingBranch === currentBranch || getUsedBranches().has(selectedExistingBranch))}
+                    disabled={pullingBranch !== null || (branchMode === "new" ? (!branchName || !baseBranch || !!branchNameError) : (!selectedExistingBranch || selectedExistingBranch === currentBranch || getUsedBranches().has(selectedExistingBranch)))}
                   >
                     Create Worktree
                   </button>
@@ -4766,6 +4868,22 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           <span className="terminal-header-title">TERMINAL</span>
           {worktreeInfo && (
             <div className="terminal-branch-wrapper">
+              <button
+                className="terminal-repo-action-btn"
+                onClick={async () => {
+                  if (!worktreeInfo?.path) return;
+                  try {
+                    await invoke("open_in_zed", { path: worktreeInfo.path });
+                  } catch (error) {
+                    console.error("Failed to open Zed:", error);
+                  }
+                }}
+                title="Open worktree in Zed"
+              >
+                <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+              </button>
               <button
                 className="terminal-branch-badge"
                 onClick={() => {
