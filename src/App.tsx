@@ -300,7 +300,7 @@ type ThemeConfig = {
 };
 
 // Keyboard shortcuts
-type ShortcutKey = "toggleSidebar" | "toggleRightSidebar" | "toggleTerminal" | "newTerminalTab" | "newTerminalGroup" | "prevTerminalTab" | "nextTerminalTab" | "closeTerminalTab";
+type ShortcutKey = "toggleSidebar" | "toggleRightSidebar" | "toggleTerminal" | "maximizeTerminal" | "newTerminalTab" | "newTerminalGroup" | "prevTerminalTab" | "nextTerminalTab" | "closeTerminalTab";
 
 type Shortcut = {
   key: string;
@@ -316,6 +316,7 @@ const DEFAULT_SHORTCUTS: ShortcutConfig = {
   toggleSidebar: { key: "b", meta: true, ctrl: false, shift: false, alt: false },
   toggleRightSidebar: { key: "b", meta: true, ctrl: false, shift: false, alt: true },
   toggleTerminal: { key: "j", meta: true, ctrl: false, shift: false, alt: false },
+  maximizeTerminal: { key: "escape", meta: false, ctrl: false, shift: true, alt: false },
   newTerminalTab: { key: "t", meta: true, ctrl: false, shift: false, alt: false },
   newTerminalGroup: { key: "\\", meta: true, ctrl: false, shift: false, alt: false },
   prevTerminalTab: { key: "[", meta: true, ctrl: false, shift: true, alt: false },
@@ -327,6 +328,7 @@ const SHORTCUT_LABELS: Record<ShortcutKey, string> = {
   toggleSidebar: "Toggle Sidebar",
   toggleRightSidebar: "Toggle Right Sidebar",
   toggleTerminal: "Toggle Terminal",
+  maximizeTerminal: "Maximize Terminal",
   newTerminalTab: "New Terminal Tab",
   newTerminalGroup: "New Terminal Group",
   prevTerminalTab: "Previous Terminal Tab",
@@ -459,9 +461,28 @@ function generateRandomThemeName(): string {
   return `${adj} ${noun}`;
 }
 
+// key를 code로 변환 (e.code는 물리적 키 위치라 한/영, modifier 영향 안받음)
+function keyToCode(key: string): string {
+  if (/^[a-z]$/i.test(key)) return `Key${key.toUpperCase()}`;
+  if (/^[0-9]$/.test(key)) return `Digit${key}`;
+  const specialKeys: Record<string, string> = {
+    "\\": "Backslash", "[": "BracketLeft", "]": "BracketRight",
+    "=": "Equal", "-": "Minus", "'": "Quote", ";": "Semicolon",
+    ",": "Comma", ".": "Period", "/": "Slash", "`": "Backquote",
+    " ": "Space", "enter": "Enter", "tab": "Tab", "escape": "Escape",
+    "backspace": "Backspace", "delete": "Delete",
+    "arrowup": "ArrowUp", "arrowdown": "ArrowDown",
+    "arrowleft": "ArrowLeft", "arrowright": "ArrowRight",
+  };
+  return specialKeys[key.toLowerCase()] || key;
+}
+
 function matchesShortcut(e: KeyboardEvent, shortcut: Shortcut): boolean {
-  const keyMatches = e.key.toLowerCase() === shortcut.key.toLowerCase() ||
-    (shortcut.key === "=" && (e.key === "=" || e.key === "+"));
+  const expectedCode = keyToCode(shortcut.key);
+  // e.code로 비교 (한/영 전환, Option 키 영향 안받음)
+  const keyMatches = e.code === expectedCode ||
+    (shortcut.key === "=" && (e.code === "Equal" || e.code === "NumpadAdd"));
+
   return keyMatches &&
     (shortcut.meta ? e.metaKey : !e.metaKey || shortcut.ctrl) &&
     (shortcut.ctrl ? e.ctrlKey : !e.ctrlKey || shortcut.meta) &&
@@ -1124,8 +1145,8 @@ async function addWorklog(issueKey: string, timeSpent: string, comment?: string,
       content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
     };
   }
-  // adjustEstimate=leave: don't change remaining estimate
-  const res = await fetch(`${getBaseUrl()}/rest/api/3/issue/${issueKey}/worklog?adjustEstimate=leave`, {
+  // adjustEstimate=auto: remaining에서 logged만큼 자동 차감
+  const res = await fetch(`${getBaseUrl()}/rest/api/3/issue/${issueKey}/worklog?adjustEstimate=auto`, {
     method: "POST",
     headers: {
       Authorization: getAuthHeader(),
@@ -2254,15 +2275,31 @@ function GlobalSettings({ onLogout, deletingWorktreeKeys, setDeletingWorktreeKey
     const handleKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.key === "Escape") {
+      if (e.code === "Escape") {
         setRecordingShortcut(null);
         return;
       }
       // Ignore modifier-only keys
-      if (["Meta", "Control", "Alt", "Shift"].includes(e.key)) return;
+      if (["MetaLeft", "MetaRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "ShiftLeft", "ShiftRight"].includes(e.code)) return;
+
+      // e.code에서 key 추출 (물리적 키 위치 기반)
+      const codeToKey = (code: string): string => {
+        if (code.startsWith("Key")) return code.slice(3).toLowerCase();
+        if (code.startsWith("Digit")) return code.slice(5);
+        const codeMap: Record<string, string> = {
+          "Backslash": "\\", "BracketLeft": "[", "BracketRight": "]",
+          "Equal": "=", "Minus": "-", "Quote": "'", "Semicolon": ";",
+          "Comma": ",", "Period": ".", "Slash": "/", "Backquote": "`",
+          "Space": " ", "Enter": "enter", "Tab": "tab", "Escape": "escape",
+          "Backspace": "backspace", "Delete": "delete",
+          "ArrowUp": "arrowup", "ArrowDown": "arrowdown",
+          "ArrowLeft": "arrowleft", "ArrowRight": "arrowright",
+        };
+        return codeMap[code] || code.toLowerCase();
+      };
 
       const newShortcut: Shortcut = {
-        key: e.key.toLowerCase(),
+        key: codeToKey(e.code),
         meta: e.metaKey,
         ctrl: e.ctrlKey,
         shift: e.shiftKey,
@@ -7974,6 +8011,24 @@ function MainApp({ onLogout }: { onLogout: () => void }) {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Maximize terminal shortcut
+  useEffect(() => {
+    const shortcuts = getShortcuts();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (matchesShortcut(e, shortcuts.maximizeTerminal)) {
+        e.preventDefault();
+        if (terminalCollapsed) {
+          setTerminalCollapsed(false);
+          setTerminalMaximized(true);
+        } else {
+          setTerminalMaximized(prev => !prev);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [terminalCollapsed]);
 
   // Close diff file with CMD+W
   useEffect(() => {
