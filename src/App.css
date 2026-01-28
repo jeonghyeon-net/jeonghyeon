@@ -1746,11 +1746,21 @@ html, body, #root {
 
 /* Issue Detail */
 .issue-detail {
-  padding: 16px;
+  padding: 0 6px 16px 6px;
   flex: 1;
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+.issue-detail-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-primary);
+  margin: 0 -6px;
+  padding: 8px 6px 3px 6px;
+  border-bottom: 1px solid var(--border);
 }
 
 .issue-loading,
@@ -1769,8 +1779,7 @@ html, body, #root {
 .issue-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
 }
 
 .issue-key-badge {
@@ -1795,7 +1804,6 @@ html, body, #root {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  margin-bottom: 12px;
 }
 
 .issue-title-row .issue-title {
@@ -1883,7 +1891,7 @@ html, body, #root {
   gap: 6px;
   font-size: var(--font-size-sm);
   color: var(--text-muted);
-  margin-bottom: 12px;
+  margin-top: 4px;
 }
 
 .parent-label {
@@ -1919,10 +1927,9 @@ html, body, #root {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 24px;
-  padding: 12px 0;
-  border-top: 1px solid var(--border);
+  padding: 12px 6px;
+  margin: 0 -6px 12px -6px;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 12px;
 }
 
 .issue-meta-item {
@@ -2048,16 +2055,12 @@ html, body, #root {
 
 .issue-description {
   margin-top: 0;
+  margin-bottom: 16px;
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
 }
 
-.issue-description:has(.edit-description) {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
 
 .description-label {
   font-size: var(--font-size-xs);
@@ -2475,8 +2478,8 @@ html, body, #root {
 
 /* Comments */
 .issue-comments {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin: 0 -6px 0 -6px;
+  padding: 6px 6px 0 6px;
   border-top: 1px solid var(--border);
 }
 
@@ -2485,17 +2488,15 @@ html, body, #root {
   font-weight: 500;
   color: var(--text-muted);
   letter-spacing: 0.03em;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .comment-item {
-  padding-bottom: 12px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
 }
 
-.comment-item:last-child {
-  border-bottom: none;
+.comment-item + .comment-item {
+  border-top: 1px solid var(--border);
 }
 
 .comment-header {
@@ -2531,7 +2532,7 @@ html, body, #root {
 }
 
 .comment-form {
-  margin-top: 16px;
+  margin-top: 8px;
 }
 
 .comment-textarea {
@@ -2625,6 +2626,31 @@ html, body, #root {
 
 .edit-inline {
   margin-bottom: 20px;
+}
+
+.issue-detail-header .edit-inline {
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.issue-detail-header .edit-inline .edit-input.title {
+  flex: 1;
+  padding: 0 4px;
+  font-size: var(--issue-title-font-size);
+  font-weight: 500;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  box-shadow: inset 0 -1px 0 var(--border-hover);
+  border-radius: 0;
+  cursor: text;
+}
+
+.issue-detail-header .edit-inline .edit-actions {
+  margin-top: 0;
+  flex-shrink: 0;
 }
 
 .edit-inline-small {
@@ -2764,9 +2790,17 @@ html, body, #root {
 .edit-description {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  height: calc(100% - 28px);
   min-height: 200px;
-  margin-top: 8px;
+  margin-bottom: 12px;
+}
+
+.issue-description:has(.edit-description) {
+  flex: 1;
+}
+
+.issue-description:has(.edit-description) ~ .issue-comments {
+  display: none;
 }
 
 .edit-textarea {

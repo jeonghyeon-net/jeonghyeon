@@ -5165,6 +5165,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
 
   const issueContent = (
     <div className="issue-detail scrollable">
+      <div className="issue-detail-header">
         <div className="issue-header">
           <div
             className="issue-key-badge clickable"
@@ -5201,59 +5202,60 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
           </button>
         </div>
 
-      {issue.parentKey && (
-        <div className="issue-parent">
-          <span className="parent-label">Parent:</span>
-          <span className="parent-link" onClick={() => onIssueClick(issue.parentKey!)}>
-            {issue.parentKey}
-          </span>
-          {issue.parentSummary && <span className="parent-summary">{issue.parentSummary}</span>}
-        </div>
-      )}
+        {issue.parentKey && (
+          <div className="issue-parent">
+            <span className="parent-label">Parent:</span>
+            <span className="parent-link" onClick={() => onIssueClick(issue.parentKey!)}>
+              {issue.parentKey}
+            </span>
+            {issue.parentSummary && <span className="parent-summary">{issue.parentSummary}</span>}
+          </div>
+        )}
 
-      {editing === "summary" ? (
-        <div className="edit-inline">
-          <input
-            type="text"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            className="edit-input title"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === "Enter") saveEdit("summary", editValue);
-              if (e.key === "Escape") setEditing(null);
-            }}
-          />
-          <div className="edit-actions">
-            <button className="edit-save" onClick={() => saveEdit("summary", editValue)} disabled={saving}>Save</button>
-            <button className="edit-cancel" onClick={() => setEditing(null)}>Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <div className="issue-title-row">
-          <h1 className="issue-title editable" onClick={() => startEdit("summary")}>
-            {issue.summary}
-            <span className="edit-icon"><EditIcon /></span>
-          </h1>
-          <div className="issue-copy-actions">
-            <span
-              className={`copy-link ${copiedKey ? "copied" : ""}`}
-              onClick={() => copyToClipboard(issue.key, "key")}
-            >
-              {copiedKey ? "Copied" : "Copy Key"}
-            </span>
-            <span
-              className={`copy-link ${copiedUrl ? "copied" : ""}`}
-              onClick={() => {
-                const baseUrl = getBaseUrl();
-                if (baseUrl) copyToClipboard(`${baseUrl}/browse/${issue.key}`, "url");
+        {editing === "summary" ? (
+          <div className="edit-inline">
+            <input
+              type="text"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              className="edit-input title"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveEdit("summary", editValue);
+                if (e.key === "Escape") setEditing(null);
               }}
-            >
-              {copiedUrl ? "Copied" : "Copy URL"}
-            </span>
+            />
+            <div className="edit-actions">
+              <button className="edit-save" onClick={() => saveEdit("summary", editValue)} disabled={saving}>Save</button>
+              <button className="edit-cancel" onClick={() => setEditing(null)}>Cancel</button>
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="issue-title-row">
+            <h1 className="issue-title editable" onClick={() => startEdit("summary")}>
+              {issue.summary}
+              <span className="edit-icon"><EditIcon /></span>
+            </h1>
+            <div className="issue-copy-actions">
+              <span
+                className={`copy-link ${copiedKey ? "copied" : ""}`}
+                onClick={() => copyToClipboard(issue.key, "key")}
+              >
+                {copiedKey ? "Copied" : "Copy Key"}
+              </span>
+              <span
+                className={`copy-link ${copiedUrl ? "copied" : ""}`}
+                onClick={() => {
+                  const baseUrl = getBaseUrl();
+                  if (baseUrl) copyToClipboard(`${baseUrl}/browse/${issue.key}`, "url");
+                }}
+              >
+                {copiedUrl ? "Copied" : "Copy URL"}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="issue-meta">
         <div className="issue-meta-item">
