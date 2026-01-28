@@ -5956,10 +5956,10 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
   const [baseBranch, setBaseBranch] = useState<string>("");
   const [branches, setBranches] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<"tree" | "flat">(() => {
-    return (localStorage.getItem("diff_view_mode") as "tree" | "flat") || "flat";
+    return (localStorage.getItem(`${getStoragePrefix()}diff_view_mode`) as "tree" | "flat") || "flat";
   });
   const [diffMode, setDiffMode] = useState<"base" | "current">(() => {
-    return (localStorage.getItem("diff_mode") as "base" | "current") || "current";
+    return (localStorage.getItem(`${getStoragePrefix()}diff_mode`) as "base" | "current") || "current";
   });
   const [lineStats, setLineStats] = useState<{ additions: number; deletions: number }>({ additions: 0, deletions: 0 });
 
@@ -6412,7 +6412,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
   const toggleViewMode = () => {
     const newMode = viewMode === "tree" ? "flat" : "tree";
     setViewMode(newMode);
-    localStorage.setItem("diff_view_mode", newMode);
+    localStorage.setItem(`${getStoragePrefix()}diff_view_mode`, newMode);
   };
 
   const expandAll = () => {
@@ -6515,17 +6515,6 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
   const projectKey = getProjectKeyFromIssueKey(issueKey);
   const worktreeInfo = getIssueWorktree(projectKey, issueKey);
 
-  if (!worktreeInfo) {
-    return (
-      <div className="diff-tree">
-        <div className="diff-tree-header">
-          <span className="diff-tree-header-spacer" />
-        </div>
-        <div className="diff-tree-empty-message">Worktree not created</div>
-      </div>
-    );
-  }
-
   return (
     <div className="diff-tree">
       <div className="diff-tree-header">
@@ -6533,10 +6522,12 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           <button
             className="diff-tree-view-toggle"
             onClick={() => {
+              if (!worktreeInfo) return;
               const newMode = diffMode === "current" ? "base" : "current";
               setDiffMode(newMode);
-              localStorage.setItem("diff_mode", newMode);
+              localStorage.setItem(`${getStoragePrefix()}diff_mode`, newMode);
             }}
+            disabled={!worktreeInfo}
             title={diffMode === "current" ? "Show changes vs base branch" : "Show working changes only"}
           >
             {diffMode === "current" ? (
@@ -6558,6 +6549,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
               className="diff-tree-base-dropdown"
               value={baseBranch}
               onChange={(e) => handleBaseBranchChange(e.target.value)}
+              disabled={!worktreeInfo}
             >
               {branches.map(b => (
                 <option key={b} value={b}>{b}</option>
@@ -6578,7 +6570,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           )}
         </div>
         {viewMode === "tree" && (
-          <button className="diff-tree-view-toggle" onClick={isAllExpanded ? collapseAll : expandAll} title={isAllExpanded ? "Collapse all" : "Expand all"}>
+          <button className="diff-tree-view-toggle" onClick={isAllExpanded ? collapseAll : expandAll} title={isAllExpanded ? "Collapse all" : "Expand all"} disabled={!worktreeInfo}>
             {isAllExpanded ? (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="4 14 10 14 10 20" />
@@ -6596,7 +6588,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
             )}
           </button>
         )}
-        <button className="diff-tree-view-toggle" onClick={toggleViewMode} title={viewMode === "tree" ? "Switch to flat view" : "Switch to tree view"}>
+        <button className="diff-tree-view-toggle" onClick={toggleViewMode} title={viewMode === "tree" ? "Switch to flat view" : "Switch to tree view"} disabled={!worktreeInfo}>
           {viewMode === "tree" ? (
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="3" y1="6" x2="21" y2="6" />
@@ -6610,7 +6602,9 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           )}
         </button>
       </div>
-      {files.length === 0 ? (
+      {!worktreeInfo ? (
+        <div className="diff-tree-empty-message">Worktree not created</div>
+      ) : files.length === 0 ? (
         <div className="diff-tree-empty">No changes</div>
       ) : viewMode === "tree" ? (
         <div className="diff-tree-content">
@@ -6782,7 +6776,7 @@ function FileDiffViewer({ issueKey, file, onBack }: {
     }
 
     // Get diffMode from localStorage to match DiffFileTree behavior
-    const diffMode = localStorage.getItem("diff_mode") || "current";
+    const diffMode = localStorage.getItem(`${getStoragePrefix()}diff_mode`) || "current";
     const baseBranch = worktreeInfo.baseBranch;
 
     // Context lines for diff (reasonable default, expandable sections handle the rest)
