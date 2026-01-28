@@ -3783,6 +3783,18 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   };
   const [projectRepoPaths, setProjectRepoPaths] = useState<string[]>(() => getProjectRepoPaths());
 
+  // Get branches used by other issues in same project
+  const getUsedBranches = (): Set<string> => {
+    const allWorktrees = getAllWorktrees();
+    const usedBranches = new Set<string>();
+    for (const wt of allWorktrees) {
+      if (wt.projectKey === projectKey && wt.issueKey !== issueKey && wt.info.branch) {
+        usedBranches.add(wt.info.branch);
+      }
+    }
+    return usedBranches;
+  };
+
   // Branch name validation
   const isValidBranchName = (name: string): boolean => {
     if (!name) return true; // Empty is valid (will use issueKey as default)
@@ -3794,8 +3806,14 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
     if (!/^[a-zA-Z0-9\-_/.]+$/.test(name)) return false;
     return true;
   };
-  const branchNameError = branchMode === "new" && branchName && !isValidBranchName(branchName)
-    ? "Invalid branch name"
+  const branchNameError = branchMode === "new" && branchName
+    ? !isValidBranchName(branchName)
+      ? "Invalid branch name"
+      : branchName === currentBranch
+        ? "Cannot use current branch"
+        : getUsedBranches().has(branchName)
+          ? "Branch is in use by another issue"
+          : null
     : null;
 
   // Worktree popover state
@@ -3899,14 +3917,36 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
       } catch {}
 
       if (exists) {
-        // Path exists, just use it (no setup.sh for existing worktrees)
+        // Path exists, create terminal and run setup.sh
         const info = { path: worktreePath, branch: targetBranch, baseBranch: branchMode === "new" ? baseBranch : defaultBaseBranch, repoPath };
         saveIssueWorktree(projectKey, capturedIssueKey, info);
-        setIssueTerminalState(capturedIssueKey, { isCreating: false });
+
+        const sessionId = await invoke("create_pty_session", { rows: 24, cols: 80, cwd: worktreePath }) as number;
+
+        // Check if this request is still valid after async operation
+        if (createRequestIds.get(capturedIssueKey) !== requestId) return;
+
+        const newGroup = { id: 1, terminals: [sessionId], activeTerminal: sessionId, flex: 1 };
+
+        setIssueTerminalState(capturedIssueKey, {
+          groups: [newGroup],
+          activeGroupId: 1,
+          nextGroupId: 2,
+          isCreating: false,
+          isAutoCreatingTerminal: false,
+        });
+
+        await invoke("write_to_pty", { sessionId, data: "./setup.sh\n" }).catch(console.error);
+
         if (issueKeyRef.current === capturedIssueKey) {
           setWorktreeInfo(info);
           setIsCreatingWorktree(false);
+          setGroupsState([newGroup]);
+          setActiveGroupIdState(1);
+          setNextGroupIdState(2);
+          setProjectRepoPaths(getProjectRepoPaths());
         }
+        onWorktreeChange?.();
         return;
       }
 
@@ -4637,13 +4677,22 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                           onChange={(e) => setSelectedExistingBranch(e.target.value)}
                         >
                           <option value="" disabled>Select branch...</option>
-                          {branches.filter(b => !b.startsWith("remotes/")).length > 0 && (
-                            <optgroup label="Local">
-                              {branches.filter(b => !b.startsWith("remotes/")).map(b => (
-                                <option key={b} value={b}>{b}{b === currentBranch ? " (current)" : ""}</option>
-                              ))}
-                            </optgroup>
-                          )}
+                          {branches.filter(b => !b.startsWith("remotes/")).length > 0 && (() => {
+                            const usedBranches = getUsedBranches();
+                            return (
+                              <optgroup label="Local">
+                                {branches.filter(b => !b.startsWith("remotes/")).map(b => {
+                                  const isUsed = usedBranches.has(b);
+                                  const isCurrent = b === currentBranch;
+                                  return (
+                                    <option key={b} value={b} disabled={isUsed || isCurrent}>
+                                      {b}{isCurrent ? " (current)" : ""}{isUsed ? " (in use)" : ""}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            );
+                          })()}
                           {branches.filter(b => b.startsWith("remotes/")).length > 0 && (
                             <optgroup label="Remote">
                               {branches.filter(b => b.startsWith("remotes/")).map(b => (
@@ -4676,10 +4725,17 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                   {worktreeError && (
                     <div className="terminal-worktree-error">{worktreeError}</div>
                   )}
+                  {branchMode === "existing" && selectedExistingBranch && (
+                    selectedExistingBranch === currentBranch ? (
+                      <div className="terminal-worktree-error">Cannot use current branch</div>
+                    ) : getUsedBranches().has(selectedExistingBranch) ? (
+                      <div className="terminal-worktree-error">This branch is in use by another issue</div>
+                    ) : null
+                  )}
                   <button
                     className="terminal-connect-btn"
                     onClick={createWorktree}
-                    disabled={branchMode === "new" ? (!branchName || !baseBranch || !!branchNameError) : !selectedExistingBranch}
+                    disabled={branchMode === "new" ? (!branchName || !baseBranch || !!branchNameError) : (!selectedExistingBranch || selectedExistingBranch === currentBranch || getUsedBranches().has(selectedExistingBranch))}
                   >
                     Create Worktree
                   </button>
@@ -5953,6 +6009,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
   const [expandedPaths, setExpandedPathsState] = useState<Set<string>>(() => {
     return issueKey ? (diffTreeExpandedPaths.get(issueKey) || new Set()) : new Set();
   });
+  const hasInitializedExpandedPaths = useRef(false);
   const [baseBranch, setBaseBranch] = useState<string>("");
   const [branches, setBranches] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<"tree" | "flat">(() => {
@@ -6355,8 +6412,11 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
       const saved = diffTreeExpandedPaths.get(issueKey);
       if (saved) {
         setExpandedPathsState(saved);
+        hasInitializedExpandedPaths.current = true;
       } else {
+        // Start with empty set, auto-expand effect will handle expansion
         setExpandedPathsState(new Set());
+        hasInitializedExpandedPaths.current = false;
       }
     }
   }, [issueKey]);
@@ -6377,6 +6437,12 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
 
       // Add new directories to expanded paths (keep existing collapsed state)
       setExpandedPaths(prev => {
+        // If first load (no saved state), expand all directories
+        if (!hasInitializedExpandedPaths.current && prev.size === 0 && allDirPaths.size > 0) {
+          hasInitializedExpandedPaths.current = true;
+          return allDirPaths;
+        }
+
         let hasNew = false;
         for (const path of allDirPaths) {
           if (!prev.has(path)) {
@@ -6501,19 +6567,8 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
     );
   };
 
-  if (!issueKey) {
-    return (
-      <div className="diff-tree">
-        <div className="diff-tree-header">
-          <span className="diff-tree-header-spacer" />
-        </div>
-        <div className="diff-tree-empty-message">Issue not selected</div>
-      </div>
-    );
-  }
-
-  const projectKey = getProjectKeyFromIssueKey(issueKey);
-  const worktreeInfo = getIssueWorktree(projectKey, issueKey);
+  const projectKey = issueKey ? getProjectKeyFromIssueKey(issueKey) : "";
+  const worktreeInfo = issueKey ? getIssueWorktree(projectKey, issueKey) : null;
 
   return (
     <div className="diff-tree">
@@ -6522,12 +6577,12 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           <button
             className="diff-tree-view-toggle"
             onClick={() => {
-              if (!worktreeInfo) return;
+              if (!issueKey || !worktreeInfo) return;
               const newMode = diffMode === "current" ? "base" : "current";
               setDiffMode(newMode);
               localStorage.setItem(`${getStoragePrefix()}diff_mode`, newMode);
             }}
-            disabled={!worktreeInfo}
+            disabled={!issueKey || !worktreeInfo}
             title={diffMode === "current" ? "Show changes vs base branch" : "Show working changes only"}
           >
             {diffMode === "current" ? (
@@ -6549,7 +6604,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
               className="diff-tree-base-dropdown"
               value={baseBranch}
               onChange={(e) => handleBaseBranchChange(e.target.value)}
-              disabled={!worktreeInfo}
+              disabled={!issueKey || !worktreeInfo}
             >
               {branches.map(b => (
                 <option key={b} value={b}>{b}</option>
@@ -6602,7 +6657,9 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           )}
         </button>
       </div>
-      {!worktreeInfo ? (
+      {!issueKey ? (
+        <div className="diff-tree-empty-message">Issue not selected</div>
+      ) : !worktreeInfo ? (
         <div className="diff-tree-empty-message">Worktree not created</div>
       ) : files.length === 0 ? (
         <div className="diff-tree-empty">No changes</div>
