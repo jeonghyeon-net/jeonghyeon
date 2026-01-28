@@ -6163,9 +6163,27 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           ]);
 
           // Parse untracked files from porcelain output (lines starting with "??")
-          const untrackedFiles = statusOutput.trim().split("\n").filter(Boolean)
+          const untrackedPaths = statusOutput.trim().split("\n").filter(Boolean)
             .filter(line => line.startsWith("?? "))
             .map(line => line.slice(3)); // Remove "?? " prefix
+
+          // Expand untracked directories to their files (parallel)
+          const prefix = `${worktreeInfo.path}/`;
+          const untrackedResults = await Promise.all(
+            untrackedPaths.map(async (p) => {
+              if (p.endsWith('/')) {
+                // Directory: get files recursively
+                const dirFiles = await invoke<string[]>("list_files_in_dir", {
+                  path: `${worktreeInfo.path}/${p}`,
+                }).catch(() => [] as string[]);
+                // Convert absolute paths to relative
+                return dirFiles.map(f => f.startsWith(prefix) ? f.slice(prefix.length) : f);
+              } else {
+                return [p];
+              }
+            })
+          );
+          const untrackedFiles = untrackedResults.flat();
 
           const rawFiles = [
             ...parseOutput(committedOutput),
@@ -6224,9 +6242,27 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           ]);
 
           // Parse untracked files from porcelain output (lines starting with "??")
-          const untrackedFiles = statusOutput.trim().split("\n").filter(Boolean)
+          const untrackedPaths = statusOutput.trim().split("\n").filter(Boolean)
             .filter(line => line.startsWith("?? "))
             .map(line => line.slice(3)); // Remove "?? " prefix
+
+          // Expand untracked directories to their files (parallel)
+          const prefix = `${worktreeInfo.path}/`;
+          const untrackedResults = await Promise.all(
+            untrackedPaths.map(async (p) => {
+              if (p.endsWith('/')) {
+                // Directory: get files recursively
+                const dirFiles = await invoke<string[]>("list_files_in_dir", {
+                  path: `${worktreeInfo.path}/${p}`,
+                }).catch(() => [] as string[]);
+                // Convert absolute paths to relative
+                return dirFiles.map(f => f.startsWith(prefix) ? f.slice(prefix.length) : f);
+              } else {
+                return [p];
+              }
+            })
+          );
+          const untrackedFiles = untrackedResults.flat();
 
           const rawFiles = [
             ...parseOutput(uncommittedOutput),
@@ -6296,7 +6332,9 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
 
     // Quick check function - only runs git status to detect changes
     let lastStatusHash = "";
+    let fetching = false;
     const quickCheck = async () => {
+      if (cancelled || fetching) return;
       const worktreeInfo = getIssueWorktree(projectKey, issueKey);
       if (!worktreeInfo) return;
 
@@ -6307,19 +6345,24 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           args: ["status", "--porcelain"],
         }).catch(() => "");
 
-        // Create a simple hash of the status
-        const currentHash = statusOutput;
+        if (cancelled) return;
 
-        if (currentHash !== lastStatusHash) {
-          lastStatusHash = currentHash;
-          fetchDiff();
+        // Compare with last status
+        if (statusOutput !== lastStatusHash) {
+          lastStatusHash = statusOutput;
+          fetching = true;
+          await fetchDiff();
+          fetching = false;
         }
       } catch {
         // Ignore errors in quick check
+        fetching = false;
       }
     };
 
-    fetchDiff(); // Initial fetch
+    // Initial fetch with fetching flag
+    fetching = true;
+    fetchDiff().finally(() => { fetching = false; });
 
     // Only start interval if worktree exists
     const worktreeExists = !!getIssueWorktree(projectKey, issueKey);
@@ -6344,9 +6387,9 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
     }
   }, [issueKey]);
 
-  // Auto-expand all on first load for this issue
+  // Auto-expand new directories when tree changes
   useEffect(() => {
-    if (tree.length > 0 && issueKey && !diffTreeExpandedPaths.has(issueKey)) {
+    if (tree.length > 0 && issueKey) {
       const allDirPaths = new Set<string>();
       const collectDirs = (nodes: DiffTreeNode[]) => {
         for (const node of nodes) {
@@ -6357,7 +6400,26 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
         }
       };
       collectDirs(tree);
-      setExpandedPaths(allDirPaths);
+
+      // Add new directories to expanded paths (keep existing collapsed state)
+      setExpandedPaths(prev => {
+        let hasNew = false;
+        for (const path of allDirPaths) {
+          if (!prev.has(path)) {
+            hasNew = true;
+            break;
+          }
+        }
+        if (!hasNew) return prev; // No change, avoid re-render
+
+        const next = new Set(prev);
+        for (const path of allDirPaths) {
+          if (!prev.has(path)) {
+            next.add(path); // Auto-expand new directories
+          }
+        }
+        return next;
+      });
     }
   }, [tree, issueKey]);
 
@@ -6635,6 +6697,7 @@ function FileDiffViewer({ issueKey, file, onBack }: {
 
   const projectKey = getProjectKeyFromIssueKey(issueKey);
   const worktreeInfo = getIssueWorktree(projectKey, issueKey);
+  const cancelledRef = useRef(false);
 
   const openInZed = async () => {
     if (!worktreeInfo) return;
@@ -6724,6 +6787,7 @@ function FileDiffViewer({ issueKey, file, onBack }: {
     const worktreeInfo = getIssueWorktree(projectKey, issueKey);
 
     if (!worktreeInfo) {
+      if (cancelledRef.current) return;
       setHunks([]);
       setDisplayedFile(file);
       return;
@@ -6733,8 +6797,8 @@ function FileDiffViewer({ issueKey, file, onBack }: {
     const diffMode = localStorage.getItem("diff_mode") || "current";
     const baseBranch = worktreeInfo.baseBranch;
 
-    // Fetch with large context for expandable sections (but not too large to avoid issues)
-    const ctx = 5000;
+    // Context lines for diff (reasonable default, expandable sections handle the rest)
+    const ctx = 100;
 
     try {
       let diffOutput = "";
@@ -6766,23 +6830,25 @@ function FileDiffViewer({ issueKey, file, onBack }: {
             }).catch(() => "");
           }
         } else {
-          // Current mode: show staged + unstaged changes
-          // First try staged changes
-          const stagedDiff = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", `--unified=${ctx}`, "--cached", "--", file.path],
-          }).catch(() => "");
-
-          // Then try unstaged changes
-          const unstagedDiff = await invoke<string>("run_git_command", {
-            cwd: worktreeInfo.path,
-            args: ["diff", `--unified=${ctx}`, "--", file.path],
-          }).catch(() => "");
+          // Current mode: show staged + unstaged changes (parallel fetch)
+          const [stagedDiff, unstagedDiff] = await Promise.all([
+            invoke<string>("run_git_command", {
+              cwd: worktreeInfo.path,
+              args: ["diff", `--unified=${ctx}`, "--cached", "--", file.path],
+            }).catch(() => ""),
+            invoke<string>("run_git_command", {
+              cwd: worktreeInfo.path,
+              args: ["diff", `--unified=${ctx}`, "--", file.path],
+            }).catch(() => ""),
+          ]);
 
           // Use whichever has content (prefer unstaged as it's more current)
           diffOutput = unstagedDiff || stagedDiff;
         }
       }
+
+      // Check if cancelled before updating state
+      if (cancelledRef.current) return;
 
       const parsed = parseDiff(diffOutput, isNewFile);
       setHunks(parsed);
@@ -6804,6 +6870,7 @@ function FileDiffViewer({ issueKey, file, onBack }: {
         contentRef.current?.scrollTo(0, 0);
       }
     } catch (e) {
+      if (cancelledRef.current) return;
       console.error("Failed to fetch diff:", e);
       setHunks([]);
       setModeChange(null);
@@ -6812,8 +6879,61 @@ function FileDiffViewer({ issueKey, file, onBack }: {
   }, [issueKey, file]);
 
   useEffect(() => {
-    fetchDiff();
-  }, [fetchDiff]);
+    cancelledRef.current = false;
+    let fetching = false;
+
+    const doFetch = async () => {
+      if (cancelledRef.current || fetching) return;
+      fetching = true;
+      await fetchDiff();
+      fetching = false;
+    };
+
+    doFetch();
+
+    // Quick check - only fetch if file status changed
+    let lastHash = "";
+    const quickCheck = async () => {
+      if (cancelledRef.current || fetching) return;
+      // Get fresh worktreeInfo inside callback to avoid stale closure
+      const currentWorktreeInfo = getIssueWorktree(projectKey, issueKey);
+      if (!currentWorktreeInfo) return;
+      try {
+        // Parallel: status + diff stat (staged + unstaged) for accurate change detection
+        const [statusOutput, unstagedStat, stagedStat] = await Promise.all([
+          invoke<string>("run_git_command", {
+            cwd: currentWorktreeInfo.path,
+            args: ["status", "--porcelain", "--", file.path],
+          }).catch(() => ""),
+          invoke<string>("run_git_command", {
+            cwd: currentWorktreeInfo.path,
+            args: ["diff", "--shortstat", "--", file.path],
+          }).catch(() => ""),
+          invoke<string>("run_git_command", {
+            cwd: currentWorktreeInfo.path,
+            args: ["diff", "--shortstat", "--cached", "--", file.path],
+          }).catch(() => ""),
+        ]);
+
+        const currentHash = statusOutput + unstagedStat + stagedStat;
+        if (!cancelledRef.current && currentHash !== lastHash) {
+          lastHash = currentHash;
+          doFetch();
+        }
+      } catch {
+        // Ignore errors
+      }
+    };
+
+    // Use primitive value for interval condition
+    const hasWorktree = !!worktreeInfo;
+    const interval = hasWorktree ? setInterval(quickCheck, 1000) : null;
+    return () => {
+      cancelledRef.current = true;
+      if (interval) clearInterval(interval);
+    };
+    // Use worktreeInfo?.path (primitive) instead of worktreeInfo (object)
+  }, [fetchDiff, worktreeInfo?.path, file.path, projectKey, issueKey]);
 
   // Process hunks into sections with collapsible context regions
   const processedSections = useMemo(() => {
@@ -6889,14 +7009,32 @@ function FileDiffViewer({ issueKey, file, onBack }: {
             const renderText = (text: string, keyPrefix: string) => {
               const parts: React.ReactNode[] = [];
               const chars = Array.from(text); // Handle surrogate pairs (emojis)
-              for (let c = 0; c < chars.length; c++) {
-                if (chars[c] === ' ') {
-                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-space">·</span>);
-                } else if (chars[c] === '\t') {
-                  parts.push(<span key={`${keyPrefix}-${c}`} className="whitespace-tab">→</span>);
+              let buffer = '';
+              let partIdx = 0;
+
+              for (const char of chars) {
+                if (char === ' ' || char === '\t') {
+                  // Flush buffer as plain text
+                  if (buffer) {
+                    parts.push(buffer);
+                    buffer = '';
+                  }
+                  // Whitespace: actual char with CSS visual indicator
+                  parts.push(
+                    <span
+                      key={`${keyPrefix}-${partIdx++}`}
+                      className={char === ' ' ? 'whitespace-space' : 'whitespace-tab'}
+                    >
+                      {char}
+                    </span>
+                  );
                 } else {
-                  parts.push(chars[c]);
+                  buffer += char;
                 }
+              }
+              // Flush remaining buffer
+              if (buffer) {
+                parts.push(buffer);
               }
               return parts;
             };
@@ -6930,19 +7068,8 @@ function FileDiffViewer({ issueKey, file, onBack }: {
   // Default context lines to show around changes
   const CONTEXT_PREVIEW = 3;
 
-  const handleCopy = (e: React.ClipboardEvent) => {
-    const selection = window.getSelection();
-    if (selection) {
-      const text = selection.toString()
-        .replace(/·/g, ' ')
-        .replace(/→/g, '\t');
-      e.clipboardData.setData('text/plain', text);
-      e.preventDefault();
-    }
-  };
-
   return (
-    <div className="file-diff-viewer" tabIndex={0} onCopy={handleCopy}>
+    <div className="file-diff-viewer" tabIndex={0}>
       <div className="file-diff-back-row">
         <button className="file-diff-back" onClick={onBack} title="Back to issue">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -7864,12 +7991,26 @@ function ReviewRequestedPRs() {
 }
 
 function MainApp({ onLogout }: { onLogout: () => void }) {
-  const [sidebarWidth, setSidebarWidth] = useState(400);
+  const [sidebarWidth, setSidebarWidthState] = useState(() => {
+    const saved = localStorage.getItem("left_sidebar_width");
+    return saved !== null ? parseInt(saved, 10) : 400;
+  });
+  const setSidebarWidth = (width: number) => {
+    setSidebarWidthState(width);
+    localStorage.setItem("left_sidebar_width", String(width));
+  };
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => {
     const saved = localStorage.getItem("left_sidebar_collapsed");
     return saved !== null ? saved === "true" : false;
   });
-  const [rightSidebarWidth, setRightSidebarWidth] = useState(400);
+  const [rightSidebarWidth, setRightSidebarWidthState] = useState(() => {
+    const saved = localStorage.getItem("right_sidebar_width");
+    return saved !== null ? parseInt(saved, 10) : 400;
+  });
+  const setRightSidebarWidth = (width: number) => {
+    setRightSidebarWidthState(width);
+    localStorage.setItem("right_sidebar_width", String(width));
+  };
   const [rightSidebarCollapsed, setRightSidebarCollapsedState] = useState(() => {
     const saved = localStorage.getItem("right_sidebar_collapsed");
     return saved !== null ? saved === "true" : true;

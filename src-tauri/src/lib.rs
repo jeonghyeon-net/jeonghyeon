@@ -483,21 +483,53 @@ fn get_app_data_dir() -> Result<String, String> {
 #[tauri::command]
 async fn list_files_in_dir(path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        use std::collections::HashSet;
+
         let dir = Path::new(&path);
         if !dir.exists() {
             return Ok(vec![]);
         }
-        let entries = std::fs::read_dir(dir)
-            .map_err(|e| format!("Failed to read directory: {}", e))?;
+
+        fn collect_files(
+            dir: &Path,
+            files: &mut Vec<String>,
+            visited: &mut HashSet<std::path::PathBuf>,
+        ) -> std::io::Result<()> {
+            // Resolve to canonical path to detect symlink cycles
+            let canonical = match dir.canonicalize() {
+                Ok(p) => p,
+                Err(_) => return Ok(()), // Skip if cannot resolve
+            };
+
+            // Check for cycles
+            if !visited.insert(canonical.clone()) {
+                return Ok(()); // Already visited, skip
+            }
+
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                let file_type = match entry.file_type() {
+                    Ok(ft) => ft,
+                    Err(_) => continue, // Skip if cannot get file type
+                };
+
+                if file_type.is_dir() {
+                    collect_files(&path, files, visited)?;
+                } else if file_type.is_file() {
+                    if let Some(s) = path.to_str() {
+                        files.push(s.to_string());
+                    }
+                }
+                // Skip symlinks to avoid potential issues
+            }
+            Ok(())
+        }
 
         let mut files = Vec::new();
-        for entry in entries {
-            if let Ok(entry) = entry {
-                if let Some(name) = entry.file_name().to_str() {
-                    files.push(name.to_string());
-                }
-            }
-        }
+        let mut visited = HashSet::new();
+        collect_files(dir, &mut files, &mut visited)
+            .map_err(|e| format!("Failed to read directory: {}", e))?;
         Ok(files)
     })
     .await

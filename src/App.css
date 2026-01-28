@@ -872,13 +872,31 @@ html, body, #root {
 
 .whitespace-space,
 .whitespace-tab {
+  position: relative;
+  color: transparent;
+}
+
+.whitespace-space::before {
+  content: '·';
+  position: absolute;
+  left: 0;
   color: var(--text-muted);
   opacity: 0.3;
+  pointer-events: none;
 }
 
 .whitespace-tab {
   display: inline-block;
   width: 4ch;
+}
+
+.whitespace-tab::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: var(--text-muted);
+  opacity: 0.3;
+  pointer-events: none;
 }
 
 .diff-line *:not(.diff-line-num) {
