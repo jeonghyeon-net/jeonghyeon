@@ -6190,7 +6190,7 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
     } else {
       setBaseBranch(worktreeInfo.baseBranch || "");
     }
-  }, [issueKey]);
+  }, [issueKey, refreshTrigger]);
 
   // Handle base branch change
   const handleBaseBranchChange = (newBaseBranch: string) => {
@@ -6316,17 +6316,16 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
             .filter(line => line.startsWith("?? "))
             .map(line => line.slice(3)); // Remove "?? " prefix
 
-          // Expand untracked directories to their files (parallel)
-          const prefix = `${worktreeInfo.path}/`;
+          // Expand untracked directories to their files (respecting .gitignore)
           const untrackedResults = await Promise.all(
             untrackedPaths.map(async (p) => {
               if (p.endsWith('/')) {
-                // Directory: get files recursively
-                const dirFiles = await invoke<string[]>("list_files_in_dir", {
-                  path: `${worktreeInfo.path}/${p}`,
-                }).catch(() => [] as string[]);
-                // Convert absolute paths to relative
-                return dirFiles.map(f => f.startsWith(prefix) ? f.slice(prefix.length) : f);
+                // Directory: use git ls-files to respect .gitignore
+                const output = await invoke<string>("run_git_command", {
+                  cwd: worktreeInfo.path,
+                  args: ["ls-files", "--others", "--exclude-standard", "--", p],
+                }).catch(() => "");
+                return output.trim().split("\n").filter(Boolean);
               } else {
                 return [p];
               }
@@ -6395,17 +6394,16 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
             .filter(line => line.startsWith("?? "))
             .map(line => line.slice(3)); // Remove "?? " prefix
 
-          // Expand untracked directories to their files (parallel)
-          const prefix = `${worktreeInfo.path}/`;
+          // Expand untracked directories to their files (respecting .gitignore)
           const untrackedResults = await Promise.all(
             untrackedPaths.map(async (p) => {
               if (p.endsWith('/')) {
-                // Directory: get files recursively
-                const dirFiles = await invoke<string[]>("list_files_in_dir", {
-                  path: `${worktreeInfo.path}/${p}`,
-                }).catch(() => [] as string[]);
-                // Convert absolute paths to relative
-                return dirFiles.map(f => f.startsWith(prefix) ? f.slice(prefix.length) : f);
+                // Directory: use git ls-files to respect .gitignore
+                const output = await invoke<string>("run_git_command", {
+                  cwd: worktreeInfo.path,
+                  args: ["ls-files", "--others", "--exclude-standard", "--", p],
+                }).catch(() => "");
+                return output.trim().split("\n").filter(Boolean);
               } else {
                 return [p];
               }
