@@ -99,6 +99,8 @@ type ProjectFilter = {
   maxResults: number;
 };
 
+type PrCheck = { name: string; status: string; conclusion: string | null; detailsUrl: string; prNumber?: number; duration?: number | null };
+
 type JiraConnection = {
   id: string;
   name: string;
@@ -3828,8 +3830,9 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   const [branchCopied, setBranchCopied] = useState(false);
 
   // PR state
-  const [prList, setPrList] = useState<Array<{ url: string; state: string; isDraft: boolean; number: number; headRefName: string; baseRefName: string }>>([]);
+  const [prList, setPrList] = useState<Array<{ url: string; state: string; isDraft: boolean; number: number; headRefName: string; baseRefName: string; reviewDecision?: string }>>([]);
   const currentPrCheckRef = useRef<{ branch: string; repoPath: string } | null>(null);
+
 
 
   // Handle repository selection
@@ -4274,11 +4277,11 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
         Promise.all([
           invoke("run_gh_command", {
             cwd: repoPath,
-            args: ["pr", "list", "--head", worktreeInfo.branch, "--json", "url,state,isDraft,number,headRefName,baseRefName", "--limit", "20"]
+            args: ["pr", "list", "--head", worktreeInfo.branch, "--json", "url,state,isDraft,number,headRefName,baseRefName,reviewDecision", "--limit", "20"]
           }),
           invoke("run_gh_command", {
             cwd: repoPath,
-            args: ["pr", "list", "--head", worktreeInfo.branch, "--state", "closed", "--json", "url,state,isDraft,number,headRefName,baseRefName", "--limit", "20"]
+            args: ["pr", "list", "--head", worktreeInfo.branch, "--state", "closed", "--json", "url,state,isDraft,number,headRefName,baseRefName,reviewDecision", "--limit", "20"]
           })
         ]).then(([openResult, closedResult]: unknown[]) => {
           if (currentPrCheckRef.current !== currentCheck) return;
@@ -4292,7 +4295,9 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
             seen.add(pr.number);
             return true;
           });
-          setPrList(unique.sort((a: { number: number }, b: { number: number }) => a.number - b.number));
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const mapped = unique.map((pr: any) => ({ ...pr, reviewDecision: pr.reviewDecision || '' }));
+          setPrList(mapped.sort((a: any, b: any) => a.number - b.number));
         }).catch(() => {
           if (currentPrCheckRef.current !== currentCheck) return;
           setPrList([]);
@@ -4300,12 +4305,9 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
       }, 0);
     };
 
-    // Delay initial PR check to not block issue switching
-    const timeout = setTimeout(checkPr, 500);
-    // Refresh PR status every 60 seconds
+    checkPr();
     const interval = setInterval(checkPr, 60000);
     return () => {
-      clearTimeout(timeout);
       clearInterval(interval);
     };
   }, [worktreeInfo, repoPath]);
@@ -4961,6 +4963,17 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                   <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 9v6c0 1.1.9 2 2 2h3" /><path d="M18 9v6" />
                 </svg>
                 {pr.isDraft ? 'Draft' : 'PR'} #{pr.number}
+                {pr.reviewDecision && (pr.state === 'OPEN' || pr.isDraft) && (
+                  <span className={`terminal-pr-review ${pr.reviewDecision === 'APPROVED' ? 'approved' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : 'pending'}`}>
+                    {pr.reviewDecision === 'APPROVED' ? (
+                      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                    ) : pr.reviewDecision === 'CHANGES_REQUESTED' ? (
+                      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                    )}
+                  </span>
+                )}
               </button>
               <div className="terminal-pr-tooltip">
                 <span className="terminal-pr-tooltip-branch">{pr.headRefName}</span>
@@ -6146,6 +6159,19 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
   });
   const [lineStats, setLineStats] = useState<{ additions: number; deletions: number }>({ additions: 0, deletions: 0 });
 
+  // PR Checks (GitHub Actions) state
+  const [prChecks, setPrChecks] = useState<PrCheck[]>([]);
+  const [prChecksExpanded, setPrChecksExpanded] = useState(false);
+  const [prChecksExpandedPrs, setPrChecksExpandedPrs] = useState<Set<number>>(new Set());
+  const [prChecksPrInfo, setPrChecksPrInfo] = useState<Array<{ number: number; headRefName: string; baseRefName: string; reviewDecision: string }>>([]);
+  const [prChecksLoading, setPrChecksLoading] = useState(false);
+  const prChecksFetchIdRef = useRef(0);
+  const prChecksIssueKeyRef = useRef(issueKey);
+  const prChecksInitializedRef = useRef(false);
+  const prChecksExpandedCache = useRef<Record<string, { expanded: boolean; expandedPrs: Set<number>; initialized: boolean }>>({});
+  const [prChecksActionMsg, setPrChecksActionMsg] = useState<Record<string, string>>({}); // key: `${runId}:${checkName}`
+  const prChecksTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
   // Wrapper to save expandedPaths to global store
   const setExpandedPaths = (value: Set<string> | ((prev: Set<string>) => Set<string>)) => {
     setExpandedPathsState(prev => {
@@ -6198,6 +6224,120 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
     } else {
       setBaseBranch(worktreeInfo.baseBranch || "");
     }
+  }, [issueKey, refreshTrigger]);
+
+  // Fetch PR checks for open/draft PRs
+  const fetchPrChecks = useCallback((clearActionMsg = false) => {
+    if (!issueKey) return;
+    const pk = getProjectKeyFromIssueKey(issueKey);
+    const wt = getIssueWorktree(pk, issueKey);
+    if (!wt?.repoPath || !wt.branch) return;
+    setPrChecksLoading(true);
+    const fetchId = ++prChecksFetchIdRef.current;
+    const repoPath = wt.repoPath;
+    const branch = wt.branch;
+
+    Promise.all([
+      invoke("run_gh_command", { cwd: repoPath, args: ["pr", "list", "--head", branch, "--json", "number,state,isDraft,headRefName,baseRefName,reviewDecision", "--limit", "10"] }),
+      invoke("run_gh_command", { cwd: repoPath, args: ["pr", "list", "--head", branch, "--state", "closed", "--json", "number,state,isDraft,headRefName,baseRefName,reviewDecision", "--limit", "10"] }),
+    ]).then(([openRes, closedRes]: unknown[]) => {
+      if (fetchId !== prChecksFetchIdRef.current) return;
+      const allPrs = [...JSON.parse(openRes as string), ...JSON.parse(closedRes as string)];
+      const seen = new Set<number>();
+      const unique = allPrs.filter((pr: { number: number }) => { if (seen.has(pr.number)) return false; seen.add(pr.number); return true; });
+      const activePrs = unique.filter((pr: { state: string; isDraft: boolean }) => pr.state === 'OPEN' || pr.isDraft);
+      if (activePrs.length === 0) { setPrChecks([]); setPrChecksPrInfo([]); setPrChecksLoading(false); return; }
+      setPrChecksPrInfo(activePrs.map((pr: any) => ({ number: pr.number, headRefName: pr.headRefName, baseRefName: pr.baseRefName, reviewDecision: pr.reviewDecision || '' })));
+      Promise.all(activePrs.map((pr: { number: number }) =>
+        invoke("run_gh_command", { cwd: repoPath, args: ["pr", "checks", String(pr.number), "--json", "name,state,description,link,startedAt,completedAt"] })
+          .then((r: unknown) => {
+            const raw = JSON.parse(r as string) as Array<{ name: string; state: string; link: string; startedAt: string; completedAt: string }>;
+            return raw.map(c => {
+              let duration: number | null = null;
+              if (c.startedAt) {
+                const end = c.completedAt ? new Date(c.completedAt).getTime() : Date.now();
+                const start = new Date(c.startedAt).getTime();
+                if (start > 0 && end >= start) duration = Math.round((end - start) / 1000);
+              }
+              return {
+                name: c.name,
+                status: ['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED'].includes(c.state) ? 'in_progress' : 'completed',
+                conclusion: c.state === 'SUCCESS' || c.state === 'NEUTRAL' ? 'success' : c.state === 'FAILURE' || c.state === 'ERROR' || c.state === 'TIMED_OUT' || c.state === 'STARTUP_FAILURE' || c.state === 'STALE' || c.state === 'ACTION_REQUIRED' ? 'failure' : c.state === 'CANCELLED' ? 'cancelled' : c.state === 'SKIPPED' ? 'skipped' : ['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'REQUESTED'].includes(c.state) ? null : c.state.toLowerCase(),
+                detailsUrl: c.link || '',
+                prNumber: pr.number,
+                duration,
+              };
+            });
+          }).catch(() => [] as PrCheck[])
+      )).then((results: PrCheck[][]) => {
+        if (fetchId !== prChecksFetchIdRef.current) return;
+        const order: Record<string, number> = { failure: 0, cancelled: 1, null: 2, skipped: 3, success: 4 };
+        const sorted = results.flat().sort((a, b) => (order[String(a.conclusion)] ?? 2) - (order[String(b.conclusion)] ?? 2));
+        setPrChecks(sorted);
+        setPrChecksLoading(false);
+        if (clearActionMsg) setPrChecksActionMsg({});
+        // Expand all only on first load
+        if (!prChecksInitializedRef.current && sorted.length > 0) {
+          prChecksInitializedRef.current = true;
+          setPrChecksExpanded(true);
+          setPrChecksExpandedPrs(new Set(activePrs.map((pr: { number: number }) => pr.number)));
+        }
+      });
+    }).catch(() => {
+      if (fetchId !== prChecksFetchIdRef.current) return;
+      setPrChecks([]); setPrChecksPrInfo([]); setPrChecksLoading(false);
+    });
+  }, [issueKey]);
+
+  useEffect(() => {
+    if (!issueKey) {
+      setPrChecks([]);
+      setPrChecksPrInfo([]);
+      setPrChecksExpanded(false);
+      setPrChecksExpandedPrs(new Set());
+      setPrChecksActionMsg({});
+      prChecksIssueKeyRef.current = '';
+      prChecksInitializedRef.current = false;
+      return;
+    }
+    const pk = getProjectKeyFromIssueKey(issueKey);
+    const wt = getIssueWorktree(pk, issueKey);
+    if (!wt?.repoPath || !wt.branch) {
+      setPrChecks([]);
+      setPrChecksPrInfo([]);
+      setPrChecksExpanded(false);
+      setPrChecksExpandedPrs(new Set());
+      setPrChecksActionMsg({});
+      prChecksIssueKeyRef.current = issueKey;
+      prChecksInitializedRef.current = false;
+      return;
+    }
+    const prevIssueKey = prChecksIssueKeyRef.current;
+    prChecksIssueKeyRef.current = issueKey;
+    if (prevIssueKey !== issueKey) {
+      // Save current state
+      if (prevIssueKey) {
+        prChecksExpandedCache.current[prevIssueKey] = { expanded: prChecksExpanded, expandedPrs: prChecksExpandedPrs, initialized: prChecksInitializedRef.current };
+      }
+      setPrChecks([]);
+      setPrChecksPrInfo([]);
+      setPrChecksActionMsg({});
+      // Restore previous state or default
+      const cached = issueKey ? prChecksExpandedCache.current[issueKey] : undefined;
+      if (cached) {
+        setPrChecksExpanded(cached.expanded);
+        setPrChecksExpandedPrs(cached.expandedPrs);
+        prChecksInitializedRef.current = cached.initialized;
+      } else {
+        setPrChecksExpanded(false);
+        setPrChecksExpandedPrs(new Set());
+        prChecksInitializedRef.current = false;
+      }
+    }
+    fetchPrChecks();
+    const interval = setInterval(fetchPrChecks, 60000);
+    return () => { clearInterval(interval); prChecksTimeoutsRef.current.forEach(clearTimeout); prChecksTimeoutsRef.current = []; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [issueKey, refreshTrigger]);
 
   // Handle base branch change
@@ -6824,6 +6964,138 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
           ))}
         </div>
       )}
+      <div className="pr-checks-section">
+          <div className={`pr-checks-toggle${prChecksExpanded ? ' expanded' : ''}`} onClick={() => setPrChecksExpanded(!prChecksExpanded)}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d={prChecksExpanded ? "M2.5 4.5L6 8L9.5 4.5" : "M9.5 7.5L6 4L2.5 7.5"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="pr-checks-toggle-label">Actions</span>
+            <span className="pr-checks-summary">
+              {(() => {
+                const f = prChecks.filter(c => c.conclusion === 'failure').length;
+                const ca = prChecks.filter(c => c.conclusion === 'cancelled').length;
+                const r = prChecks.filter(c => !c.conclusion).length;
+                const sk = prChecks.filter(c => c.conclusion === 'skipped').length;
+                const s = prChecks.filter(c => c.conclusion === 'success').length;
+                return (
+                  <>
+                    {f > 0 && <span className="pr-checks-count-icon failure"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>{f}</span>}
+                    {ca > 0 && <span className="pr-checks-count-icon cancelled"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg>{ca}</span>}
+                    {r > 0 && <span className="pr-checks-count-icon pending"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>{r}</span>}
+                    {sk > 0 && <span className="pr-checks-count-icon skipped"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><polygon points="5 4 15 12 5 20" /><line x1="19" y1="5" x2="19" y2="19" /></svg>{sk}</span>}
+                    {s > 0 && <span className="pr-checks-count-icon success"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>{s}</span>}
+                  </>
+                );
+              })()}
+            </span>
+            <button className={`pr-checks-refresh ${prChecksLoading ? 'loading' : ''}`} onClick={(e) => { e.stopPropagation(); fetchPrChecks(true); }} title="Refresh">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+                <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+            </button>
+          </div>
+          {prChecksExpanded && (
+            <div className="pr-checks-list">
+              {prChecks.length === 0 && <div className="pr-checks-empty">No checks found</div>}
+              {prChecksPrInfo.map(pr => {
+                const checks = prChecks.filter(c => c.prNumber === pr.number);
+                if (checks.length === 0) return null;
+                const isExpanded = prChecksExpandedPrs.has(pr.number);
+                const prF = checks.filter(c => c.conclusion === 'failure').length;
+                const prCa = checks.filter(c => c.conclusion === 'cancelled').length;
+                const prR = checks.filter(c => !c.conclusion).length;
+                const prSk = checks.filter(c => c.conclusion === 'skipped').length;
+                const prS = checks.filter(c => c.conclusion === 'success').length;
+                return (
+                  <div key={pr.number} className="pr-checks-pr-section">
+                    <div className="pr-checks-pr-header" onClick={() => setPrChecksExpandedPrs(prev => { const next = new Set(prev); if (next.has(pr.number)) next.delete(pr.number); else next.add(pr.number); return next; })}>
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d={isExpanded ? "M2.5 4.5L6 8L9.5 4.5" : "M9.5 7.5L6 4L2.5 7.5"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <span className="pr-checks-pr-title">#{pr.number}</span>
+                      {pr.reviewDecision && (
+                        <span className={`pr-checks-review ${pr.reviewDecision === 'APPROVED' ? 'approved' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : 'pending'}`} title={pr.reviewDecision === 'APPROVED' ? 'Approved' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes requested' : 'Review required'}>
+                          {pr.reviewDecision === 'APPROVED' ? (
+                            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                          ) : pr.reviewDecision === 'CHANGES_REQUESTED' ? (
+                            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                          )}
+                        </span>
+                      )}
+                      <span className="pr-checks-pr-branch">{pr.headRefName} → {pr.baseRefName}</span>
+                      <span className="pr-checks-summary">
+                        {prF > 0 && <span className="pr-checks-count-icon failure"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>{prF}</span>}
+                        {prCa > 0 && <span className="pr-checks-count-icon cancelled"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg>{prCa}</span>}
+                        {prR > 0 && <span className="pr-checks-count-icon pending"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>{prR}</span>}
+                        {prSk > 0 && <span className="pr-checks-count-icon skipped"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><polygon points="5 4 15 12 5 20" /><line x1="19" y1="5" x2="19" y2="19" /></svg>{prSk}</span>}
+                        {prS > 0 && <span className="pr-checks-count-icon success"><svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>{prS}</span>}
+                      </span>
+                    </div>
+                    {isExpanded && checks.map((check, i) => {
+                      const runId = check.detailsUrl?.match(/\/runs\/(\d+)/)?.[1];
+                      const actionKey = runId ? `${runId}:${check.name}` : null;
+                      return (
+                        <div key={i} className="pr-checks-item" onClick={() => check.detailsUrl && openUrl(check.detailsUrl)} style={{ cursor: check.detailsUrl ? 'pointer' : 'default' }}>
+                          {actionKey && prChecksActionMsg[actionKey] && <div className="pr-checks-action-overlay">{prChecksActionMsg[actionKey]}</div>}
+                          <span className={`pr-checks-dot ${check.conclusion === 'success' ? 'success' : check.conclusion === 'failure' || check.conclusion === 'cancelled' ? 'failure' : check.conclusion === 'skipped' ? 'skipped' : 'pending'}`} />
+                          <span className="pr-checks-name">{check.name}</span>
+                          {check.duration != null && (
+                            <span className="pr-checks-duration">
+                              {check.duration >= 60 ? `${Math.floor(check.duration / 60)}m ${check.duration % 60}s` : `${check.duration}s`}
+                            </span>
+                          )}
+                          <span className={`pr-checks-status ${check.conclusion === 'success' ? 'success' : check.conclusion === 'failure' || check.conclusion === 'cancelled' ? 'failure' : check.conclusion === 'skipped' ? 'skipped' : 'pending'}`}>
+                            {check.conclusion || 'running'}
+                          </span>
+                          {actionKey && check.status === 'completed' && (
+                            <button className="pr-checks-action-btn" title="Re-run" style={prChecksActionMsg[actionKey] ? { visibility: 'hidden' } : undefined} onClick={(e) => {
+                              e.stopPropagation();
+                              const pk = getProjectKeyFromIssueKey(issueKey!);
+                              const wt = getIssueWorktree(pk, issueKey!);
+                              if (!wt?.repoPath) return;
+                              // Mark all jobs in same run with overlay
+                              setPrChecksActionMsg(prev => {
+                                const next = { ...prev };
+                                checks.filter(c => c.detailsUrl?.match(new RegExp(`/runs/${runId}(/|$)`))).forEach(c => { next[`${runId}:${c.name}`] = 'Re-run requested'; });
+                                return next;
+                              });
+                              invoke("run_gh_command", { cwd: wt.repoPath, args: ["run", "rerun", runId!] }).then(() => {
+                                prChecksTimeoutsRef.current.push(setTimeout(() => fetchPrChecks(true), 5000));
+                              }).catch(() => fetchPrChecks(true));
+                            }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="11" height="11"><path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>
+                            </button>
+                          )}
+                          {actionKey && check.status === 'in_progress' && (
+                            <button className="pr-checks-action-btn" title="Cancel" style={prChecksActionMsg[actionKey] ? { visibility: 'hidden' } : undefined} onClick={(e) => {
+                              e.stopPropagation();
+                              const pk = getProjectKeyFromIssueKey(issueKey!);
+                              const wt = getIssueWorktree(pk, issueKey!);
+                              if (!wt?.repoPath) return;
+                              // Mark all jobs in same run with overlay
+                              setPrChecksActionMsg(prev => {
+                                const next = { ...prev };
+                                checks.filter(c => c.detailsUrl?.match(new RegExp(`/runs/${runId}(/|$)`))).forEach(c => { next[`${runId}:${c.name}`] = 'Cancel requested'; });
+                                return next;
+                              });
+                              invoke("run_gh_command", { cwd: wt.repoPath, args: ["run", "cancel", runId!] }).then(() => {
+                                prChecksTimeoutsRef.current.push(setTimeout(() => fetchPrChecks(true), 5000));
+                              }).catch(() => fetchPrChecks(true));
+                            }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" width="11" height="11"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+      </div>
     </div>
   );
 }
@@ -7858,6 +8130,7 @@ type GitHubPR = {
   updatedAt: string;
   headRefName?: string;
   baseRefName?: string;
+  reviewDecision?: string;
 };
 
 // PR Data Context - Single GraphQL query for both MyPRs and ReviewRequestedPRs
@@ -7900,6 +8173,8 @@ function PRDataProvider({ children }: { children: React.ReactNode }) {
               updatedAt
               headRefName
               baseRefName
+              reviewDecision
+
             }
           }
         }
@@ -7915,6 +8190,8 @@ function PRDataProvider({ children }: { children: React.ReactNode }) {
               updatedAt
               headRefName
               baseRefName
+              reviewDecision
+
             }
           }
         }
@@ -7926,7 +8203,10 @@ function PRDataProvider({ children }: { children: React.ReactNode }) {
       if (fetchId !== fetchIdRef.current) return;
       const data = JSON.parse(result);
       const transformNodes = (nodes: unknown[]): GitHubPR[] =>
-        nodes.filter((n): n is GitHubPR => n !== null && typeof n === "object" && "number" in n);
+        nodes.filter((n): n is GitHubPR => n !== null && typeof n === "object" && "number" in n).map(n => ({
+          ...n,
+          reviewDecision: (n as Record<string, unknown>).reviewDecision as string || '',
+        }));
       setMyPRs(transformNodes(data?.data?.myPRs?.nodes || []));
       setReviewRequestedPRs(transformNodes(data?.data?.reviewRequested?.nodes || []));
       setError(null);
@@ -8068,6 +8348,17 @@ function MyPRs() {
                   <div className="my-pr-title">
                     <span className="my-pr-number">#{pr.number}</span>
                     {pr.title || "Untitled"}
+                    {pr.reviewDecision && (
+                      <span className={`my-pr-review ${pr.reviewDecision === 'APPROVED' ? 'approved' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : 'pending'}`} title={pr.reviewDecision === 'APPROVED' ? 'Approved' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes requested' : 'Review required'}>
+                        {pr.reviewDecision === 'APPROVED' ? (
+                          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
+                        ) : pr.reviewDecision === 'CHANGES_REQUESTED' ? (
+                          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+                        )}
+                      </span>
+                    )}
                   </div>
                   <div className="my-pr-meta">
                     <span className="my-pr-repo">{pr.repository?.nameWithOwner || "unknown"}</span>
