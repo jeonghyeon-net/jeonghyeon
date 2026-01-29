@@ -4297,7 +4297,13 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
           });
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const mapped = unique.map((pr: any) => ({ ...pr, reviewDecision: pr.reviewDecision || '' }));
-          setPrList(mapped.sort((a: any, b: any) => a.number - b.number));
+          const stateOrder = (pr: any) => {
+            if (pr.state === 'CLOSED') return 0;
+            if (pr.state === 'MERGED') return 1;
+            if (pr.isDraft) return 2;
+            return 3; // open
+          };
+          setPrList(mapped.sort((a: any, b: any) => stateOrder(a) - stateOrder(b) || a.number - b.number));
         }).catch(() => {
           if (currentPrCheckRef.current !== currentCheck) return;
           setPrList([]);

@@ -2,7 +2,7 @@
   "name": "jeonghyeon",
   "private": true,
   "license": "MIT",
-  "version": "0.2.25",
+  "version": "0.2.26",
   "type": "module",
   "scripts": {
     "vite:dev": "vite",

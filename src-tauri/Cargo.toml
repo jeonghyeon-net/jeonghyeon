@@ -1,6 +1,6 @@
 [package]
 name = "jeonghyeon"
-version = "0.2.25"
+version = "0.2.26"
 description = "Developer workspace with Jira integration, terminal, and Git tools"
 authors = ["Jeonghyeon Kim"]
 edition = "2024"
