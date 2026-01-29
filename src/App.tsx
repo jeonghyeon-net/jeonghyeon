@@ -6793,13 +6793,21 @@ function DiffFileTree({ issueKey, onFilesCountChange, onFileSelect, selectedFile
         </div>
       ) : (
         <div className="diff-tree-content">
-          {[...files].sort((a, b) => {
-            const aHasDir = a.path.includes('/');
-            const bHasDir = b.path.includes('/');
-            if (aHasDir && !bHasDir) return -1;
-            if (!aHasDir && bHasDir) return 1;
-            return a.path.localeCompare(b.path);
-          }).map(file => (
+          {(() => {
+            const flattenTree = (nodes: DiffTreeNode[]): DiffFile[] => {
+              const result: DiffFile[] = [];
+              for (const node of nodes) {
+                if (node.isDir) {
+                  result.push(...flattenTree(node.children));
+                } else {
+                  const f = files.find(f => f.path === node.path);
+                  if (f) result.push(f);
+                }
+              }
+              return result;
+            };
+            return flattenTree(tree);
+          })().map(file => (
             <div
               key={file.path}
               className={`diff-tree-item diff-tree-file diff-tree-flat ${selectedFile === file.path ? "selected" : ""}`}
@@ -7848,6 +7856,8 @@ type GitHubPR = {
   author: { login: string };
   createdAt: string;
   updatedAt: string;
+  headRefName?: string;
+  baseRefName?: string;
 };
 
 // PR Data Context - Single GraphQL query for both MyPRs and ReviewRequestedPRs
@@ -7888,6 +7898,8 @@ function PRDataProvider({ children }: { children: React.ReactNode }) {
               author { login }
               createdAt
               updatedAt
+              headRefName
+              baseRefName
             }
           }
         }
@@ -7901,6 +7913,8 @@ function PRDataProvider({ children }: { children: React.ReactNode }) {
               author { login }
               createdAt
               updatedAt
+              headRefName
+              baseRefName
             }
           }
         }
@@ -8048,6 +8062,9 @@ function MyPRs() {
                   className="my-pr-item"
                   onClick={() => pr.url && openUrl(pr.url)}
                 >
+                  {pr.headRefName && pr.baseRefName && (
+                    <div className="my-pr-branch-info">{pr.headRefName} → {pr.baseRefName}</div>
+                  )}
                   <div className="my-pr-title">
                     <span className="my-pr-number">#{pr.number}</span>
                     {pr.title || "Untitled"}
@@ -8141,6 +8158,9 @@ function ReviewRequestedPRs() {
                   className="review-pr-item"
                   onClick={() => pr.url && openUrl(pr.url)}
                 >
+                  {pr.headRefName && pr.baseRefName && (
+                    <div className="review-pr-branch-info">{pr.headRefName} → {pr.baseRefName}</div>
+                  )}
                   <div className="review-pr-title">
                     <span className="review-pr-number">#{pr.number}</span>
                     {pr.title || "Untitled"}
