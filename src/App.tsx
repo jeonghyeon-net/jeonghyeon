@@ -3825,12 +3825,10 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   const [isDeletingWorktree, setIsDeletingWorktree] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pathCopied, setPathCopied] = useState(false);
+  const [branchCopied, setBranchCopied] = useState(false);
 
   // PR state
-  const [prUrl, setPrUrl] = useState<string | null>(null);
-  const [prState, setPrState] = useState<string | null>(null);
-  const [prIsDraft, setPrIsDraft] = useState(false);
-  const [prNumber, setPrNumber] = useState<number | null>(null);
+  const [prList, setPrList] = useState<Array<{ url: string; state: string; isDraft: boolean; number: number; headRefName: string; baseRefName: string }>>([]);
   const currentPrCheckRef = useRef<{ branch: string; repoPath: string } | null>(null);
 
 
@@ -4254,10 +4252,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
     setBranchMode("new");
     setSelectedExistingBranch("");
     setBranchName(issueKey);
-    setPrUrl(null);
-    setPrIsDraft(false);
-    setPrState(null);
-    setPrNumber(null);
+    setPrList([]);
     setProjectRepoPaths(getProjectRepoPaths());
   }, [issueKey, projectKey]);
 
@@ -4265,10 +4260,7 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
   useEffect(() => {
     if (!worktreeInfo || !repoPath) {
       currentPrCheckRef.current = null;
-      setPrUrl(null);
-      setPrState(null);
-      setPrIsDraft(false);
-      setPrNumber(null);
+      setPrList([]);
       return;
     }
 
@@ -4279,29 +4271,31 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
       // Double defer to completely isolate from React's event loop
       setTimeout(() => {
         if (currentPrCheckRef.current !== currentCheck) return;
-        invoke("run_gh_command", {
-          cwd: repoPath,
-          args: ["pr", "list", "--head", worktreeInfo.branch, "--json", "url,state,isDraft,number", "--limit", "1"]
-        }).then((result: unknown) => {
+        Promise.all([
+          invoke("run_gh_command", {
+            cwd: repoPath,
+            args: ["pr", "list", "--head", worktreeInfo.branch, "--json", "url,state,isDraft,number,headRefName,baseRefName", "--limit", "20"]
+          }),
+          invoke("run_gh_command", {
+            cwd: repoPath,
+            args: ["pr", "list", "--head", worktreeInfo.branch, "--state", "closed", "--json", "url,state,isDraft,number,headRefName,baseRefName", "--limit", "20"]
+          })
+        ]).then(([openResult, closedResult]: unknown[]) => {
           if (currentPrCheckRef.current !== currentCheck) return;
-          const data = JSON.parse(result as string);
-          if (data.length > 0) {
-            setPrUrl(data[0].url);
-            setPrState(data[0].state);
-            setPrIsDraft(data[0].isDraft || false);
-            setPrNumber(data[0].number);
-          } else {
-            setPrUrl(null);
-            setPrState(null);
-            setPrIsDraft(false);
-            setPrNumber(null);
-          }
+          const openData = JSON.parse(openResult as string);
+          const closedData = JSON.parse(closedResult as string);
+          const allPrs = [...openData, ...closedData];
+          // Deduplicate by number
+          const seen = new Set<number>();
+          const unique = allPrs.filter((pr: { number: number }) => {
+            if (seen.has(pr.number)) return false;
+            seen.add(pr.number);
+            return true;
+          });
+          setPrList(unique.sort((a: { number: number }, b: { number: number }) => a.number - b.number));
         }).catch(() => {
           if (currentPrCheckRef.current !== currentCheck) return;
-          setPrUrl(null);
-          setPrState(null);
-          setPrIsDraft(false);
-          setPrNumber(null);
+          setPrList([]);
         });
       }, 0);
     };
@@ -4927,7 +4921,12 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
                         <div className="terminal-popover-info">
                           <div className="terminal-popover-row">
                             <span className="terminal-popover-label">Branch</span>
-                            <span className="terminal-popover-value">{worktreeInfo.branch}</span>
+                            <div className="terminal-popover-path-row">
+                              <span className="terminal-popover-value terminal-popover-path">{worktreeInfo.branch}</span>
+                              <button className={`terminal-popover-copy ${branchCopied ? 'copied' : ''}`} onClick={() => { navigator.clipboard.writeText(worktreeInfo.branch); setBranchCopied(true); setTimeout(() => setBranchCopied(false), 1500); }} title="Copy branch">
+                                {branchCopied ? <CheckIcon /> : <CopyIcon />}
+                              </button>
+                            </div>
                           </div>
                           <div className="terminal-popover-row">
                             <span className="terminal-popover-label">Path</span>
@@ -4952,18 +4951,27 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
               )}
             </div>
           )}
-          {prUrl && (
-            <button
-              className={`terminal-pr-badge ${prIsDraft ? 'draft' : prState === 'OPEN' ? 'open' : prState === 'MERGED' ? 'merged' : 'closed'}`}
-              onClick={() => openUrl(prUrl)}
-              title={prIsDraft ? 'Draft PR' : `PR ${prState?.toLowerCase()}`}
-            >
-              <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 9v6c0 1.1.9 2 2 2h3" /><path d="M18 9v6" />
-              </svg>
-              {prIsDraft ? 'Draft' : 'PR'}{prNumber ? ` #${prNumber}` : ''}
-            </button>
-          )}
+          {prList.map((pr) => (
+            <div key={pr.number} className="terminal-pr-badge-wrapper">
+              <button
+                className={`terminal-pr-badge ${pr.isDraft ? 'draft' : pr.state === 'OPEN' ? 'open' : pr.state === 'MERGED' ? 'merged' : 'closed'}`}
+                onClick={() => openUrl(pr.url)}
+              >
+                <svg className="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 9v6c0 1.1.9 2 2 2h3" /><path d="M18 9v6" />
+                </svg>
+                {pr.isDraft ? 'Draft' : 'PR'} #{pr.number}
+              </button>
+              <div className="terminal-pr-tooltip">
+                <span className="terminal-pr-tooltip-branch">{pr.headRefName}</span>
+                <span className="terminal-pr-tooltip-arrow">→</span>
+                <span className="terminal-pr-tooltip-branch">{pr.baseRefName}</span>
+                <span className={`terminal-pr-tooltip-state ${pr.isDraft ? 'draft' : pr.state === 'OPEN' ? 'open' : pr.state === 'MERGED' ? 'merged' : 'closed'}`}>
+                  {pr.isDraft ? 'Draft' : pr.state === 'OPEN' ? 'Open' : pr.state === 'MERGED' ? 'Merged' : 'Closed'}
+                </span>
+              </div>
+            </div>
+          ))}
         </div>
         <div className="terminal-header-actions">
           <button className="terminal-header-btn" onClick={createNewGroup} title="Split"><SplitIcon /></button>

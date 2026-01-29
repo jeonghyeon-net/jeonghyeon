@@ -3631,6 +3631,56 @@ html, body, #root {
   background: var(--bg-tertiary);
 }
 
+.terminal-pr-badge-wrapper {
+  position: relative;
+}
+
+.terminal-pr-badge-wrapper:hover .terminal-pr-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.terminal-pr-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 1000;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.terminal-pr-tooltip-arrow {
+  color: var(--text-muted);
+}
+
+.terminal-pr-tooltip-branch {
+  color: var(--text-secondary);
+}
+
+.terminal-pr-tooltip-state {
+  margin-left: 4px;
+  font-weight: 500;
+}
+
+.terminal-pr-tooltip-state.open { color: var(--pr-open); }
+.terminal-pr-tooltip-state.merged { color: var(--pr-merged); }
+.terminal-pr-tooltip-state.closed { color: var(--pr-closed); }
+.terminal-pr-tooltip-state.draft { color: var(--pr-draft); }
+
 .terminal-pr-badge {
   display: flex;
   align-items: center;
