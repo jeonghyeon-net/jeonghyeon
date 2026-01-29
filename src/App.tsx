@@ -5026,6 +5026,8 @@ function TerminalPanel({ issueKey, projectKey, isCollapsed, setIsCollapsed, isMa
 
 function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, refreshTrigger, terminalCollapsed, setTerminalCollapsed, terminalMaximized, setTerminalMaximized, renderTerminal = true }: { issueKey: string; onIssueClick: (key: string) => void; onCreateChild: (projectKey: string, parentKey: string) => void; onRefresh: () => void; refreshTrigger: number; terminalCollapsed: boolean; setTerminalCollapsed: (v: boolean) => void; terminalMaximized: boolean; setTerminalMaximized: (v: boolean) => void; renderTerminal?: boolean }) {
   const [showTerminal, _setShowTerminal] = useState(true);
+  const issueKeyRef = useRef(issueKey);
+  issueKeyRef.current = issueKey;
   const [issue, setIssue] = useState<IssueDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -5107,7 +5109,10 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   };
 
   const reload = () => {
-    fetchIssueDetail(issueKey).then(setIssue).catch(console.error);
+    const capturedKey = issueKey;
+    fetchIssueDetail(capturedKey).then((data) => {
+      if (issueKeyRef.current === capturedKey) setIssue(data);
+    }).catch(console.error);
   };
 
   useEffect(() => {
@@ -5116,6 +5121,7 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
     setError(null);
     setEditing(null);
     setEditValue("");
+    setSaving(false);
     // Reset worklog states
     setShowLogWork(false);
     setLogTimeSpent("");
@@ -5140,7 +5146,10 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
   // Auto refresh (no loading state)
   useEffect(() => {
     if (refreshTrigger > 0) {
-      fetchIssueDetail(issueKey).then(setIssue).catch(console.error);
+      const capturedKey = issueKey;
+      fetchIssueDetail(capturedKey).then((data) => {
+        if (issueKeyRef.current === capturedKey) setIssue(data);
+      }).catch(console.error);
     }
   }, [refreshTrigger, issueKey]);
 
@@ -5187,18 +5196,19 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
 
   const saveEdit = async (field: string, value: any) => {
     if (!issue) return;
+    const capturedKey = issueKey;
     setSaving(true);
     try {
       if (field === "status") {
-        await transitionIssue(issueKey, value);
+        await transitionIssue(capturedKey, value);
       } else if (field === "assignee") {
-        await updateIssueField(issueKey, "assignee", value ? { accountId: value } : null);
+        await updateIssueField(capturedKey, "assignee", value ? { accountId: value } : null);
       } else if (field === "reporter") {
-        await updateIssueField(issueKey, "reporter", value ? { accountId: value } : null);
+        await updateIssueField(capturedKey, "reporter", value ? { accountId: value } : null);
       } else if (field === "priority") {
-        await updateIssueField(issueKey, "priority", { id: value });
+        await updateIssueField(capturedKey, "priority", { id: value });
       } else if (field === "summary") {
-        await updateIssueField(issueKey, "summary", value);
+        await updateIssueField(capturedKey, "summary", value);
       } else if (field === "description") {
         // ADF format for plain text
         const adf = {
@@ -5209,27 +5219,31 @@ function IssueDetailView({ issueKey, onIssueClick, onCreateChild, onRefresh, ref
             content: line ? [{ type: "text", text: line }] : [],
           })),
         };
-        await updateIssueField(issueKey, "description", adf);
+        await updateIssueField(capturedKey, "description", adf);
       } else if (field === "labels") {
-        await updateIssueField(issueKey, "labels", value);
+        await updateIssueField(capturedKey, "labels", value);
       } else if (field === "components") {
         const components = value.map((name: string) => {
           const comp = projectComponents.find(c => c.name === name);
           return comp ? { id: comp.id } : null;
         }).filter(Boolean);
-        await updateIssueField(issueKey, "components", components);
+        await updateIssueField(capturedKey, "components", components);
       } else if (field === "duedate") {
-        await updateIssueField(issueKey, "duedate", value);
+        await updateIssueField(capturedKey, "duedate", value);
       } else if (field === "issueType") {
-        await updateIssueField(issueKey, "issuetype", { id: value });
+        await updateIssueField(capturedKey, "issuetype", { id: value });
       }
-      reload();
+      if (issueKeyRef.current === capturedKey) {
+        reload();
+      }
       onRefresh();
     } catch (e) {
       console.error(e);
     } finally {
-      setSaving(false);
-      setEditing(null);
+      if (issueKeyRef.current === capturedKey) {
+        setSaving(false);
+        setEditing(null);
+      }
     }
   };
 
